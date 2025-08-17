@@ -3028,8 +3028,12 @@ def entered_on_arrivals_tab():
                         
                         try:
                             db = get_database()
-                            # Note: We'll need to add arrivals ingestion to database.py
-                            db_status.success("✅ Data loaded to SQL database successfully!")
+                            success = db.ingest_arrivals_data(df)
+                            
+                            if success:
+                                db_status.success("✅ Data loaded to SQL database successfully!")
+                            else:
+                                db_status.error("❌ Failed to load data to database")
                         except Exception as e:
                             db_status.warning(f"⚠️ Database storage not available: {str(e)}")
                     
@@ -3047,21 +3051,33 @@ def entered_on_arrivals_tab():
         # Load and display current data
         arrivals_data = st.session_state.get('arrivals_data')
         
-        # Try to load from existing CSV if no data in session
+        # Try to load from database first, then CSV as fallback
         if arrivals_data is None:
-            try:
-                csv_path = "data/processed/arrival_check.csv"
-                if os.path.exists(csv_path):
-                    arrivals_data = pd.read_csv(csv_path)
-                    # Convert date columns
-                    date_cols = ['ARRIVAL', 'DEPARTURE']
-                    for col in date_cols:
-                        if col in arrivals_data.columns:
-                            arrivals_data[col] = pd.to_datetime(arrivals_data[col])
-                    st.session_state.arrivals_data = arrivals_data
-                    st.info(f"✅ Loaded existing arrival data: {len(arrivals_data)} records")
-            except Exception as e:
-                conversion_logger.error(f"Failed to load existing arrival data: {e}")
+            if database_available:
+                try:
+                    db = get_database()
+                    arrivals_data = db.get_arrivals_data()
+                    if not arrivals_data.empty:
+                        st.session_state.arrivals_data = arrivals_data
+                        st.info(f"✅ Loaded arrival data from database: {len(arrivals_data)} records")
+                except Exception as e:
+                    conversion_logger.error(f"Failed to load arrivals data from database: {e}")
+            
+            # Fallback to CSV if database not available or empty
+            if arrivals_data is None or arrivals_data.empty:
+                try:
+                    csv_path = "data/processed/arrival_check.csv"
+                    if os.path.exists(csv_path):
+                        arrivals_data = pd.read_csv(csv_path)
+                        # Convert date columns
+                        date_cols = ['ARRIVAL', 'DEPARTURE']
+                        for col in date_cols:
+                            if col in arrivals_data.columns:
+                                arrivals_data[col] = pd.to_datetime(arrivals_data[col])
+                        st.session_state.arrivals_data = arrivals_data
+                        st.info(f"✅ Loaded existing arrival data from CSV: {len(arrivals_data)} records")
+                except Exception as e:
+                    conversion_logger.error(f"Failed to load existing arrival data: {e}")
         
         if arrivals_data is not None and not arrivals_data.empty:
             # Comprehensive Analysis Section
@@ -3244,20 +3260,31 @@ def entered_on_arrivals_tab():
         # Load arrivals data
         arrivals_data = st.session_state.get('arrivals_data')
         
-        # Try to load from existing CSV if no data in session
+        # Try to load from database first, then CSV as fallback
         if arrivals_data is None:
-            try:
-                csv_path = "data/processed/arrival_check.csv"
-                if os.path.exists(csv_path):
-                    arrivals_data = pd.read_csv(csv_path)
-                    # Convert date columns
-                    date_cols = ['ARRIVAL', 'DEPARTURE']
-                    for col in date_cols:
-                        if col in arrivals_data.columns:
-                            arrivals_data[col] = pd.to_datetime(arrivals_data[col])
-                    st.session_state.arrivals_data = arrivals_data
-            except Exception as e:
-                st.error(f"Failed to load arrival data: {e}")
+            if database_available:
+                try:
+                    db = get_database()
+                    arrivals_data = db.get_arrivals_data()
+                    if not arrivals_data.empty:
+                        st.session_state.arrivals_data = arrivals_data
+                except Exception as e:
+                    conversion_logger.error(f"Failed to load arrivals data from database: {e}")
+            
+            # Fallback to CSV if database not available or empty
+            if arrivals_data is None or arrivals_data.empty:
+                try:
+                    csv_path = "data/processed/arrival_check.csv"
+                    if os.path.exists(csv_path):
+                        arrivals_data = pd.read_csv(csv_path)
+                        # Convert date columns
+                        date_cols = ['ARRIVAL', 'DEPARTURE']
+                        for col in date_cols:
+                            if col in arrivals_data.columns:
+                                arrivals_data[col] = pd.to_datetime(arrivals_data[col])
+                        st.session_state.arrivals_data = arrivals_data
+                except Exception as e:
+                    st.error(f"Failed to load arrival data: {e}")
         
         if arrivals_data is not None and not arrivals_data.empty:
             # Data summary

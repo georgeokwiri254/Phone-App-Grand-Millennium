@@ -499,6 +499,94 @@ class RevenueDatabase:
             logger.error(f"Failed to get entered on summary stats: {e}")
             return {}
     
+    def ingest_arrivals_data(self, df: pd.DataFrame) -> bool:
+        """
+        Ingest arrivals data into database
+        
+        Args:
+            df: DataFrame with arrivals data (from converter)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Ingesting arrivals data: {len(df)} rows")
+            
+            # Clean data for database insertion
+            df_clean = df.copy()
+            
+            # Convert date columns to string format for SQLite
+            date_columns = ['ARRIVAL', 'DEPARTURE']
+            for col in date_columns:
+                if col in df_clean.columns:
+                    df_clean[col] = pd.to_datetime(df_clean[col]).dt.strftime('%Y-%m-%d')
+            
+            # Use pandas to_sql for efficient bulk insert
+            df_clean.to_sql('arrivals', self.connection, if_exists='replace', index=False)
+            
+            # Update metadata
+            self._update_metadata('arrivals_last_updated', datetime.now().isoformat())
+            self._update_metadata('arrivals_rows', str(len(df)))
+            
+            self.connection.commit()
+            logger.info("Arrivals data ingested successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to ingest arrivals data: {e}")
+            logger.error(f"DataFrame columns: {list(df.columns)}")
+            return False
+    
+    def get_arrivals_data(self, company_name: Optional[str] = None, 
+                         start_date: Optional[str] = None, 
+                         end_date: Optional[str] = None) -> pd.DataFrame:
+        """
+        Retrieve arrivals data
+        
+        Args:
+            company_name: Filter by company name
+            start_date: Start date filter (YYYY-MM-DD)
+            end_date: End date filter (YYYY-MM-DD)
+            
+        Returns:
+            DataFrame with arrivals data
+        """
+        try:
+            query = "SELECT * FROM arrivals"
+            params = []
+            conditions = []
+            
+            if company_name:
+                conditions.append("COMPANY_NAME_CLEAN = ?")
+                params.append(company_name)
+            
+            if start_date:
+                conditions.append("ARRIVAL >= ?")
+                params.append(start_date)
+            
+            if end_date:
+                conditions.append("ARRIVAL <= ?")
+                params.append(end_date)
+            
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            
+            query += " ORDER BY ARRIVAL, COMPANY_NAME_CLEAN"
+            
+            df = pd.read_sql_query(query, self.connection, params=params)
+            
+            # Convert date columns back to datetime
+            date_columns = ['ARRIVAL', 'DEPARTURE']
+            for col in date_columns:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col])
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve arrivals data: {e}")
+            return pd.DataFrame()
+    
     def get_segment_data(self, merged_segment: Optional[str] = None) -> pd.DataFrame:
         """
         Retrieve segment analysis data
