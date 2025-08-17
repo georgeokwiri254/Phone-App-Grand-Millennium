@@ -2603,6 +2603,541 @@ def events_analysis_tab():
         else:
             st.info("No block bookings found coinciding with major events.")
 
+def historical_forecast_tab():
+    """Historical & Forecast tab - historical data analysis and trends"""
+    st.header("📊 Historical & Forecast Analysis")
+    
+    # Initialize historical data if not already loaded
+    if 'historical_data_loaded' not in st.session_state:
+        st.session_state.historical_data_loaded = False
+    
+    # Load historical data into SQLite
+    if not st.session_state.historical_data_loaded:
+        load_historical_data()
+        st.session_state.historical_data_loaded = True
+    
+    # Display static KPIs at the top with smaller font
+    display_historical_kpis()
+    
+    st.divider()
+    
+    # Large trend charts section
+    st.subheader("📈 Daily Occupancy Trends (2022-2025)")
+    display_occupancy_trends()
+    
+    st.divider()
+    
+    st.subheader("💰 ADR Trends (2022-2025)")
+    display_adr_trends()
+    
+    st.divider()
+    
+    # Month filter section
+    st.subheader("📊 Monthly Comparison Analysis")
+    
+    # Month selection
+    months = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+    
+    selected_month = st.selectbox(
+        "Select Month for Comparison:",
+        months,
+        index=7,  # Default to August
+        help="Compare data across years for the selected month"
+    )
+    
+    # Display responsive KPIs for selected month
+    display_monthly_kpis(selected_month)
+    
+    # Monthly comparison charts - Occupancy above, ADR below
+    st.write("##### Monthly Occupancy Comparison")
+    display_monthly_occupancy_comparison(selected_month)
+    
+    st.divider()
+    
+    st.write("##### Monthly ADR Comparison")
+    display_monthly_adr_comparison(selected_month)
+
+def load_historical_data():
+    """Load historical data files into SQLite database"""
+    try:
+        db = get_database()
+        
+        # Historical occupancy files
+        occupancy_files = [
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/historical_occupancy_2022_040906 - historical_occupancy_2022_040906.csv.csv",
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/historical_occupancy_2023_040911 - historical_occupancy_2023_040911.csv.csv",
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/historical_occupancy_2024_040917 - historical_occupancy_2024_040917.csv.csv"
+        ]
+        
+        # Historical segment files
+        segment_files = [
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/Historical-segemtent_2022_ 032622 - Historical-segemtent_2022_ 032622.csv.csv",
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/Historical_segment_2023_032649 - Historical_segment_2023_032649.csv.csv",
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/Historical_segment_2024_045642.csv (1).csv"
+        ]
+        
+        # Load occupancy data
+        for file_path in occupancy_files:
+            if os.path.exists(file_path):
+                df = pd.read_csv(file_path)
+                df['Year'] = pd.to_datetime(df['Date']).dt.year
+                
+                # Calculate occupancy percentage
+                df['Occupancy_Pct'] = (df['Rm Sold'] / 339) * 100
+                
+                # Save updated CSV with occupancy percentage
+                year = df['Year'].iloc[0]
+                updated_file_path = file_path.replace('.csv', '_updated.csv')
+                df.to_csv(updated_file_path, index=False)
+                
+                table_name = f"historical_occupancy_{year}"
+                db.save_historical_occupancy_data(df, table_name)
+        
+        # Load segment data
+        for file_path in segment_files:
+            if os.path.exists(file_path):
+                df = pd.read_csv(file_path)
+                df['Year'] = pd.to_datetime(df['Month']).dt.year
+                table_name = f"historical_segment_{df['Year'].iloc[0]}"
+                db.save_historical_segment_data(df, table_name)
+        
+        st.success("✅ Historical data loaded successfully into SQLite database")
+        
+    except Exception as e:
+        st.error(f"Error loading historical data: {str(e)}")
+
+def display_historical_kpis():
+    """Display KPIs for revenue, ADR, and occupancy by year with smaller fonts"""
+    try:
+        db = get_database()
+        
+        # Add custom CSS for smaller metrics
+        st.markdown("""
+        <style>
+        .small-metric {
+            font-size: 0.8rem;
+        }
+        .small-metric .metric-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        .small-metric .metric-label {
+            font-size: 0.7rem;
+            color: #666;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Create 4 columns for KPIs (2022, 2023, 2024, 2025)
+        col1, col2, col3, col4 = st.columns(4)
+        
+        years = [2022, 2023, 2024, 2025]
+        columns = [col1, col2, col3, col4]
+        
+        for year, col in zip(years, columns):
+            with col:
+                st.markdown(f"**{year}**")
+                
+                if year < 2025:
+                    # Get historical data
+                    occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+                    
+                    if not occupancy_data.empty:
+                        total_revenue = occupancy_data['Revenue'].sum()
+                        avg_adr = occupancy_data['ADR'].mean()
+                        total_rooms_sold = occupancy_data['Rm Sold'].sum()
+                        total_days = len(occupancy_data)
+                        avg_occupancy_pct = (total_rooms_sold / (total_days * 339)) * 100 if total_days > 0 else 0
+                        
+                        # Use smaller metrics
+                        st.markdown(f'<div class="small-metric"><div class="metric-label">Revenue</div><div class="metric-value">AED {total_revenue:,.0f}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="small-metric"><div class="metric-label">Avg ADR</div><div class="metric-value">AED {avg_adr:.0f}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="small-metric"><div class="metric-label">Occupancy</div><div class="metric-value">{avg_occupancy_pct:.1f}%</div></div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="small-metric"><div class="metric-value">No Data</div></div>', unsafe_allow_html=True)
+                else:
+                    # 2025 - Current year data from main tables
+                    current_data = db.get_occupancy_data()
+                    if not current_data.empty:
+                        # Filter for 2025 data
+                        current_data['Date'] = pd.to_datetime(current_data['Date'])
+                        current_2025 = current_data[current_data['Date'].dt.year == 2025]
+                        
+                        if not current_2025.empty:
+                            total_revenue = current_2025['Revenue'].sum()
+                            avg_adr = current_2025['ADR'].mean()
+                            total_rooms_sold = current_2025['Rm_Sold'].sum()
+                            total_days = len(current_2025)
+                            avg_occupancy_pct = (total_rooms_sold / (total_days * 339)) * 100 if total_days > 0 else 0
+                            
+                            st.markdown(f'<div class="small-metric"><div class="metric-label">Revenue</div><div class="metric-value">AED {total_revenue:,.0f}</div></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="small-metric"><div class="metric-label">Avg ADR</div><div class="metric-value">AED {avg_adr:.0f}</div></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="small-metric"><div class="metric-label">Occupancy</div><div class="metric-value">{avg_occupancy_pct:.1f}%</div></div>', unsafe_allow_html=True)
+                        else:
+                            st.markdown('<div class="small-metric"><div class="metric-value">No Data</div></div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="small-metric"><div class="metric-value">No Data</div></div>', unsafe_allow_html=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying KPIs: {str(e)}")
+
+def display_occupancy_trends():
+    """Display occupancy trends with all years as trend lines"""
+    try:
+        db = get_database()
+        fig = go.Figure()
+        
+        # Add trend lines for 2022-2024
+        for year in [2022, 2023, 2024]:
+            occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+            if not occupancy_data.empty:
+                occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                occupancy_data = occupancy_data.sort_values('Date')
+                # Calculate occupancy percentage
+                occupancy_data['Occupancy_Pct'] = (occupancy_data['Rm Sold'] / 339) * 100
+                
+                fig.add_trace(go.Scatter(
+                    x=occupancy_data['Date'],
+                    y=occupancy_data['Occupancy_Pct'],
+                    mode='lines',
+                    name=f'{year} Occupancy',
+                    line=dict(width=2)
+                ))
+        
+        # Add 2025 data as trend line
+        current_data = db.get_occupancy_data()
+        if not current_data.empty:
+            current_data['Date'] = pd.to_datetime(current_data['Date'])
+            current_2025 = current_data[current_data['Date'].dt.year == 2025].sort_values('Date')
+            
+            if not current_2025.empty:
+                # Calculate occupancy percentage for 2025
+                current_2025['Occupancy_Pct'] = (current_2025['Rm_Sold'] / 339) * 100
+                
+                fig.add_trace(go.Scatter(
+                    x=current_2025['Date'],
+                    y=current_2025['Occupancy_Pct'],
+                    mode='lines',
+                    name='2025 Occupancy',
+                    line=dict(width=3, color='orange')
+                ))
+        
+        fig.update_layout(
+            title="Daily Occupancy Trends (2022-2025)",
+            xaxis_title="Date",
+            yaxis_title="Occupancy Percentage (%)",
+            hovermode='x unified',
+            height=600,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying occupancy trends: {str(e)}")
+
+def display_adr_trends():
+    """Display ADR trends with all years as trend lines"""
+    try:
+        db = get_database()
+        fig = go.Figure()
+        
+        # Add trend lines for 2022-2024
+        for year in [2022, 2023, 2024]:
+            occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+            if not occupancy_data.empty:
+                occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                occupancy_data = occupancy_data.sort_values('Date')
+                
+                fig.add_trace(go.Scatter(
+                    x=occupancy_data['Date'],
+                    y=occupancy_data['ADR'],
+                    mode='lines',
+                    name=f'{year} ADR',
+                    line=dict(width=2)
+                ))
+        
+        # Add 2025 data as trend line
+        current_data = db.get_occupancy_data()
+        if not current_data.empty:
+            current_data['Date'] = pd.to_datetime(current_data['Date'])
+            current_2025 = current_data[current_data['Date'].dt.year == 2025].sort_values('Date')
+            
+            if not current_2025.empty:
+                fig.add_trace(go.Scatter(
+                    x=current_2025['Date'],
+                    y=current_2025['ADR'],
+                    mode='lines',
+                    name='2025 ADR',
+                    line=dict(width=3, color='green')
+                ))
+        
+        fig.update_layout(
+            title="ADR Trends (2022-2025)",
+            xaxis_title="Date",
+            yaxis_title="ADR (AED)",
+            hovermode='x unified',
+            height=600,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying ADR trends: {str(e)}")
+
+def display_monthly_kpis(selected_month):
+    """Display responsive KPIs for selected month with very small text"""
+    try:
+        db = get_database()
+        month_num = ["January", "February", "March", "April", "May", "June",
+                     "July", "August", "September", "October", "November", "December"].index(selected_month) + 1
+        
+        # Add custom CSS for responsive metrics matching static KPIs
+        st.markdown("""
+        <style>
+        .responsive-metric {
+            font-size: 0.9rem;
+            text-align: center;
+            padding: 8px;
+            margin: 3px;
+        }
+        .responsive-metric .metric-value {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #000000;
+            margin-bottom: 2px;
+        }
+        .responsive-metric .metric-label {
+            font-size: 0.8rem;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 3px;
+        }
+        .responsive-kpi-container {
+            display: flex;
+            justify-content: space-around;
+            margin: 15px 0;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Create KPI container
+        kpi_data = []
+        
+        # Get data for each year
+        for year in [2022, 2023, 2024, 2025]:
+            if year < 2025:
+                # Historical data
+                occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+                if not occupancy_data.empty:
+                    occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                    month_data = occupancy_data[occupancy_data['Date'].dt.month == month_num]
+                    
+                    if not month_data.empty:
+                        revenue = month_data['Revenue'].sum()
+                        adr = month_data['ADR'].mean()
+                        occupancy_pct = (month_data['Rm Sold'].sum() / (len(month_data) * 339)) * 100
+                    else:
+                        revenue = 0
+                        adr = 0
+                        occupancy_pct = 0
+                else:
+                    revenue = 0
+                    adr = 0
+                    occupancy_pct = 0
+            else:
+                # 2025 current data
+                current_data = db.get_occupancy_data()
+                if not current_data.empty:
+                    current_data['Date'] = pd.to_datetime(current_data['Date'])
+                    month_data = current_data[(current_data['Date'].dt.year == 2025) & 
+                                            (current_data['Date'].dt.month == month_num)]
+                    
+                    if not month_data.empty:
+                        revenue = month_data['Revenue'].sum()
+                        adr = month_data['ADR'].mean()
+                        occupancy_pct = (month_data['Rm_Sold'].sum() / (len(month_data) * 339)) * 100
+                    else:
+                        revenue = 0
+                        adr = 0
+                        occupancy_pct = 0
+                else:
+                    revenue = 0
+                    adr = 0
+                    occupancy_pct = 0
+            
+            kpi_data.append({
+                'year': year,
+                'revenue': revenue,
+                'adr': adr,
+                'occupancy': occupancy_pct
+            })
+        
+        # Display KPIs in a compact format
+        st.markdown(f"**KPIs for {selected_month} (All Years)**")
+        
+        # Revenue KPIs
+        revenue_html = '<div class="responsive-kpi-container">'
+        revenue_html += '<div class="responsive-metric"><div class="metric-label">Revenue</div></div>'
+        for data in kpi_data:
+            revenue_html += f'<div class="responsive-metric"><div class="metric-label">{data["year"]}</div><div class="metric-value">AED {data["revenue"]:,.0f}</div></div>'
+        revenue_html += '</div>'
+        
+        # ADR KPIs
+        adr_html = '<div class="responsive-kpi-container">'
+        adr_html += '<div class="responsive-metric"><div class="metric-label">ADR</div></div>'
+        for data in kpi_data:
+            adr_html += f'<div class="responsive-metric"><div class="metric-label">{data["year"]}</div><div class="metric-value">AED {data["adr"]:.0f}</div></div>'
+        adr_html += '</div>'
+        
+        # Occupancy KPIs
+        occupancy_html = '<div class="responsive-kpi-container">'
+        occupancy_html += '<div class="responsive-metric"><div class="metric-label">Occupancy</div></div>'
+        for data in kpi_data:
+            occupancy_html += f'<div class="responsive-metric"><div class="metric-label">{data["year"]}</div><div class="metric-value">{data["occupancy"]:.1f}%</div></div>'
+        occupancy_html += '</div>'
+        
+        st.markdown(revenue_html, unsafe_allow_html=True)
+        st.markdown(adr_html, unsafe_allow_html=True)
+        st.markdown(occupancy_html, unsafe_allow_html=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying monthly KPIs: {str(e)}")
+
+def display_monthly_occupancy_comparison(selected_month):
+    """Display monthly occupancy comparison: 2025 bars + historical trend lines"""
+    try:
+        db = get_database()
+        month_num = ["January", "February", "March", "April", "May", "June",
+                     "July", "August", "September", "October", "November", "December"].index(selected_month) + 1
+        
+        fig = go.Figure()
+        
+        # Add historical trend lines (2022-2024)
+        for year in [2022, 2023, 2024]:
+            occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+            if not occupancy_data.empty:
+                occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                month_data = occupancy_data[occupancy_data['Date'].dt.month == month_num].sort_values('Date')
+                
+                if not month_data.empty:
+                    month_data['Occupancy_Pct'] = (month_data['Rm Sold'] / 339) * 100
+                    
+                    fig.add_trace(go.Scatter(
+                        x=month_data['Date'].dt.day,
+                        y=month_data['Occupancy_Pct'],
+                        mode='lines',
+                        name=f'{year}',
+                        line=dict(width=2)
+                    ))
+        
+        # Add 2025 data as bars
+        current_data = db.get_occupancy_data()
+        if not current_data.empty:
+            current_data['Date'] = pd.to_datetime(current_data['Date'])
+            month_2025 = current_data[(current_data['Date'].dt.year == 2025) & 
+                                    (current_data['Date'].dt.month == month_num)].sort_values('Date')
+            
+            if not month_2025.empty:
+                month_2025['Occupancy_Pct'] = (month_2025['Rm_Sold'] / 339) * 100
+                
+                fig.add_trace(go.Bar(
+                    x=month_2025['Date'].dt.day,
+                    y=month_2025['Occupancy_Pct'],
+                    name='2025',
+                    opacity=0.7,
+                    marker_color='orange'
+                ))
+        
+        fig.update_layout(
+            title=f"{selected_month} Occupancy Comparison",
+            xaxis_title="Day of Month",
+            yaxis_title="Occupancy %",
+            hovermode='x unified',
+            height=400,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying monthly occupancy comparison: {str(e)}")
+
+def display_monthly_adr_comparison(selected_month):
+    """Display monthly ADR comparison: 2025 bars + historical trend lines"""
+    try:
+        db = get_database()
+        month_num = ["January", "February", "March", "April", "May", "June",
+                     "July", "August", "September", "October", "November", "December"].index(selected_month) + 1
+        
+        fig = go.Figure()
+        
+        # Add historical trend lines (2022-2024)
+        for year in [2022, 2023, 2024]:
+            occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+            if not occupancy_data.empty:
+                occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                month_data = occupancy_data[occupancy_data['Date'].dt.month == month_num].sort_values('Date')
+                
+                if not month_data.empty:
+                    fig.add_trace(go.Scatter(
+                        x=month_data['Date'].dt.day,
+                        y=month_data['ADR'],
+                        mode='lines',
+                        name=f'{year}',
+                        line=dict(width=2)
+                    ))
+        
+        # Add 2025 data as bars
+        current_data = db.get_occupancy_data()
+        if not current_data.empty:
+            current_data['Date'] = pd.to_datetime(current_data['Date'])
+            month_2025 = current_data[(current_data['Date'].dt.year == 2025) & 
+                                    (current_data['Date'].dt.month == month_num)].sort_values('Date')
+            
+            if not month_2025.empty:
+                fig.add_trace(go.Bar(
+                    x=month_2025['Date'].dt.day,
+                    y=month_2025['ADR'],
+                    name='2025',
+                    opacity=0.7,
+                    marker_color='gold'
+                ))
+        
+        fig.update_layout(
+            title=f"{selected_month} ADR Comparison",
+            xaxis_title="Day of Month",
+            yaxis_title="ADR (AED)",
+            hovermode='x unified',
+            height=400,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying monthly ADR comparison: {str(e)}")
+
 def main():
     """Main application function"""
     
@@ -2829,7 +3364,7 @@ def main():
     
     # All tab options for routing
     all_tab_options = [
-        "Dashboard", "Daily Occupancy", "Segment Analysis", "ADR Analysis", 
+        "Dashboard", "Daily Occupancy", "Segment Analysis", "ADR Analysis", "Historical & Forecast",
         "Block Analysis", "Block Dashboard", "Events Analysis", 
         "Enhanced Forecasting", "Machine Learning", "Insights Analysis", "Controls & Logs"
     ]
@@ -2840,6 +3375,7 @@ def main():
         "Daily Occupancy": None, 
         "Segment Analysis": None,
         "ADR Analysis": None,
+        "Historical & Forecast": None,
         "Block": ["Block Analysis", "Block Dashboard"],
         "Events Analysis": None,
         "Forecast": ["Enhanced Forecasting", "Machine Learning", "Insights Analysis"],
@@ -3019,6 +3555,7 @@ def main():
             "Daily Occupancy", 
             "Segment Analysis",
             "ADR Analysis",
+            "Historical & Forecast",
             "Block Analysis",
             "Block Dashboard", 
             "Events Analysis",
@@ -3093,6 +3630,8 @@ def main():
         segment_analysis_tab()
     elif current_tab == "ADR Analysis":
         adr_analysis_tab()
+    elif current_tab == "Historical & Forecast":
+        historical_forecast_tab()
     elif current_tab == "Block Analysis":
         block_analysis_tab()
     elif current_tab == "Block Dashboard":

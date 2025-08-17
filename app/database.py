@@ -584,6 +584,135 @@ class RevenueDatabase:
             logger.error(f"Failed to get block summary stats: {e}")
             return {}
     
+    def save_historical_occupancy_data(self, df: pd.DataFrame, table_name: str) -> bool:
+        """
+        Save historical occupancy data to database
+        
+        Args:
+            df: DataFrame with historical occupancy data
+            table_name: Name of the table to create/update
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            cursor = self.connection.cursor()
+            
+            # Create table if it doesn't exist
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Date TEXT,
+                    DOW TEXT,
+                    "Rm Sold" REAL,
+                    Revenue REAL,
+                    ADR REAL,
+                    RevPar REAL,
+                    Occupancy_Pct REAL,
+                    Year INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Clear existing data for this table
+            cursor.execute(f"DELETE FROM {table_name}")
+            
+            # Insert data
+            df.to_sql(table_name, self.connection, if_exists='append', index=False)
+            self.connection.commit()
+            
+            logger.info(f"Successfully saved {len(df)} historical occupancy records to {table_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save historical occupancy data to {table_name}: {e}")
+            return False
+    
+    def save_historical_segment_data(self, df: pd.DataFrame, table_name: str) -> bool:
+        """
+        Save historical segment data to database
+        
+        Args:
+            df: DataFrame with historical segment data
+            table_name: Name of the table to create/update
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            cursor = self.connection.cursor()
+            
+            # Create table if it doesn't exist
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Month TEXT,
+                    Segment TEXT,
+                    Business_on_the_Books_Rooms REAL,
+                    Business_on_the_Books_Revenue REAL,
+                    Business_on_the_Books_ADR REAL,
+                    Business_on_the_Books_Share_per_Segment REAL,
+                    Dis_BOB REAL,
+                    MergedSegment TEXT,
+                    Year INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Clear existing data for this table
+            cursor.execute(f"DELETE FROM {table_name}")
+            
+            # Insert data
+            df.to_sql(table_name, self.connection, if_exists='append', index=False)
+            self.connection.commit()
+            
+            logger.info(f"Successfully saved {len(df)} historical segment records to {table_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save historical segment data to {table_name}: {e}")
+            return False
+    
+    def get_historical_occupancy_data(self, table_name: str) -> pd.DataFrame:
+        """
+        Get historical occupancy data from specified table
+        
+        Args:
+            table_name: Name of the historical table
+            
+        Returns:
+            DataFrame with historical occupancy data
+        """
+        try:
+            query = f"SELECT * FROM {table_name} ORDER BY Date"
+            df = pd.read_sql_query(query, self.connection)
+            logger.info(f"Retrieved {len(df)} historical occupancy records from {table_name}")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to get historical occupancy data from {table_name}: {e}")
+            return pd.DataFrame()
+    
+    def get_historical_segment_data(self, table_name: str) -> pd.DataFrame:
+        """
+        Get historical segment data from specified table
+        
+        Args:
+            table_name: Name of the historical table
+            
+        Returns:
+            DataFrame with historical segment data
+        """
+        try:
+            query = f"SELECT * FROM {table_name} ORDER BY Month"
+            df = pd.read_sql_query(query, self.connection)
+            logger.info(f"Retrieved {len(df)} historical segment records from {table_name}")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to get historical segment data from {table_name}: {e}")
+            return pd.DataFrame()
+    
     def close(self):
         """Close database connection"""
         if self.connection:
