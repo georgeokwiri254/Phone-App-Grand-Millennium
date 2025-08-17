@@ -11,6 +11,7 @@ from plotly.subplots import make_subplots
 import os
 import sys
 import base64
+import traceback
 from pathlib import Path
 from datetime import datetime, timedelta
 import io
@@ -50,6 +51,8 @@ except ImportError:
 
 try:
     from converters.block_converter import run_block_conversion
+    from converters.segment_converter import run_segment_conversion
+    from converters.occupancy_converter import run_occupancy_conversion
     converters_available = True
 except ImportError:
     converters_available = False

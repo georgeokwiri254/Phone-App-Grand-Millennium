@@ -54,10 +54,34 @@ def process_mhr_pickup_report(file_path, output_path=None):
     
     # Load the DPR sheet from the Excel file
     try:
+        # First, check what sheets are available
+        excel_file = pd.ExcelFile(file_path)
+        available_sheets = excel_file.sheet_names
+        print(f"Available sheets: {available_sheets}")
+        
+        if 'DPR' not in available_sheets:
+            print(f"[ERROR] 'DPR' sheet not found. Available sheets: {available_sheets}")
+            return None
+            
         df = pd.read_excel(file_path, sheet_name='DPR', header=None)
         print(f"Original shape: {df.shape}")
     except Exception as e:
         print(f"[ERROR] Error reading file: {str(e)}")
+        try:
+            # Try to get sheet names for debugging
+            excel_file = pd.ExcelFile(file_path)
+            print(f"Available sheets: {excel_file.sheet_names}")
+        except:
+            print("[ERROR] Could not read Excel file at all")
+        return None
+    
+    # Validate minimum requirements
+    if df.shape[1] < 3:
+        print(f"[ERROR] File must have at least 3 columns, found {df.shape[1]}")
+        return None
+    
+    if df.shape[0] < 4:
+        print(f"[ERROR] File must have at least 4 rows, found {df.shape[0]}")
         return None
     
     # STEP 1: Delete rows 1-3 (index 0-2)
