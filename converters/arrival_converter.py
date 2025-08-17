@@ -83,9 +83,11 @@ def process_arrival_report(file_path, output_csv_path=None):
         
         # Remove rows with no confirmation number in column A (HCN)
         initial_count = len(df)
-        df = df.dropna(subset=[df.columns[0]])  # Column A should have confirmation numbers
+        # Remove rows where HCN is null, 0, 0.0, empty string, or any invalid value
+        mask = (df[df.columns[0]].notna()) & (df[df.columns[0]] != 0) & (df[df.columns[0]] != 0.0) & (df[df.columns[0]] != '') & (df[df.columns[0]].astype(str).str.strip() != '')
+        df = df[mask]
         removed_count = initial_count - len(df)
-        logger.info(f"Removed {removed_count} rows without confirmation numbers. {len(df)} records remaining.")
+        logger.info(f"Removed {removed_count} rows without valid confirmation numbers. {len(df)} records remaining.")
         
         # Convert date columns
         df['ARRIVAL'] = pd.to_datetime(df['ARRIVAL'], errors='coerce')

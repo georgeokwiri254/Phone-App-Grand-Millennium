@@ -3098,11 +3098,11 @@ def entered_on_arrivals_tab():
                 y=company_arrivals.index,
                 orientation='h',
                 title="Top 15 Companies by Arrival Count",
-                labels={'x': 'Number of Arrivals', 'y': 'Company Name'},
-                color=company_arrivals.values,
-                color_continuous_scale='Blues'
+                labels={'x': 'Number of Arrivals', 'y': 'Company Name'}
             )
             fig_company.update_layout(height=500, showlegend=False)
+            # Simple blue color for all bars
+            fig_company.update_traces(marker_color='#1f77b4')
             st.plotly_chart(fig_company, use_container_width=True)
             
             # 2. Company Deposit Analysis with T-Company Flagging
@@ -3157,40 +3157,18 @@ def entered_on_arrivals_tab():
                 with col2:
                     st.metric("Regular Bookings (≤10 days)", f"{total_bookings - long_bookings:,}")
             
-            # 4. Check-in/Check-out Trend Curve by Company Count
-            st.markdown("### 📅 Check-in/Check-out Trends by Company Count")
+            # 4. Check-out Trend Curve by Company Count
+            st.markdown("### 📅 Check-out Trends by Company Count")
             
-            col1, col2 = st.columns(2)
-            
-            # Daily arrival trends
-            if 'ARRIVAL' in arrivals_data.columns:
-                daily_arrivals = arrivals_data.groupby(arrivals_data['ARRIVAL'].dt.date).agg({
-                    'ARRIVAL_COUNT': 'sum',
-                    'COMPANY_NAME_CLEAN': 'nunique'
-                }).rename(columns={'COMPANY_NAME_CLEAN': 'Unique_Companies_Arrival'})
-                
-                with col1:
-                    fig_arrival = px.line(
-                        x=daily_arrivals.index,
-                        y=daily_arrivals['ARRIVAL_COUNT'],
-                        title="Daily Check-in Count Trend",
-                        labels={'x': 'Date', 'y': 'Number of Check-ins'},
-                        color_discrete_sequence=['#1f77b4']
-                    )
-                    st.plotly_chart(fig_arrival, use_container_width=True)
-                    
-                    # Show table
-                    st.markdown("**📊 Daily Check-ins Table:**")
-                    st.dataframe(daily_arrivals.tail(10))
-            
-            # Daily departure trends
+            # Daily departure trends only (check-in trend removed since arrival dates are same)
             if 'DEPARTURE' in arrivals_data.columns:
                 daily_departures = arrivals_data.groupby(arrivals_data['DEPARTURE'].dt.date).agg({
                     'ARRIVAL_COUNT': 'sum',
                     'COMPANY_NAME_CLEAN': 'nunique'
                 }).rename(columns={'ARRIVAL_COUNT': 'DEPARTURE_COUNT', 'COMPANY_NAME_CLEAN': 'Unique_Companies_Departure'})
                 
-                with col2:
+                col1, col2 = st.columns(2)
+                with col1:
                     fig_departure = px.line(
                         x=daily_departures.index,
                         y=daily_departures['DEPARTURE_COUNT'],
@@ -3199,7 +3177,8 @@ def entered_on_arrivals_tab():
                         color_discrete_sequence=['#ff7f0e']
                     )
                     st.plotly_chart(fig_departure, use_container_width=True)
-                    
+                
+                with col2:
                     # Show table
                     st.markdown("**📊 Daily Check-outs Table:**")
                     st.dataframe(daily_departures.tail(10))
