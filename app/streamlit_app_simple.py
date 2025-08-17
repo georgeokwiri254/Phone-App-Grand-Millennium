@@ -3018,7 +3018,9 @@ def entered_on_arrivals_tab():
                     df, csv_path = process_arrival_report(temp_path)
                     conversion_status.success("✅ Auto-conversion completed successfully!")
                     
-                    # Store in session state
+                    # Clear any old cached data and store fresh data
+                    if 'arrivals_data' in st.session_state:
+                        del st.session_state.arrivals_data
                     st.session_state.arrivals_data = df
                     
                     # Load to database if available
