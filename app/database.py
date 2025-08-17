@@ -164,6 +164,64 @@ class RevenueDatabase:
                 )
             """)
             
+            # Create entered_on table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS entered_on (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    FULL_NAME TEXT,
+                    FIRST_NAME TEXT,
+                    ARRIVAL DATE,
+                    DEPARTURE DATE,
+                    NIGHTS INTEGER,
+                    PERSONS INTEGER,
+                    ROOM TEXT,
+                    TDF REAL,
+                    NET REAL,
+                    TOTAL REAL,
+                    RATE_CODE TEXT,
+                    INSERT_USER TEXT,
+                    C_T_S_NAME TEXT,
+                    SHORT_RESV_STATUS TEXT,
+                    ADR REAL,
+                    AMOUNT REAL,
+                    COMMENT TEXT,
+                    C_CHECK TEXT,
+                    RESV_ID TEXT,
+                    SEASON TEXT,
+                    LONG_BOOKING_FLAG INTEGER,
+                    SPLIT_MONTH TEXT,
+                    SPLIT_YEAR INTEGER,
+                    SPLIT_MONTH_NUM INTEGER,
+                    NIGHTS_IN_MONTH INTEGER,
+                    AMOUNT_IN_MONTH REAL,
+                    PERIOD_START DATE,
+                    PERIOD_END DATE,
+                    ADR_IN_MONTH REAL,
+                    BOOKING_LEAD_TIME INTEGER,
+                    EVENTS_DATES TEXT,
+                    COMPANY_CLEAN TEXT,
+                    AUG INTEGER DEFAULT 0,
+                    SEP INTEGER DEFAULT 0,
+                    OCT INTEGER DEFAULT 0,
+                    NOV INTEGER DEFAULT 0,
+                    DEC INTEGER DEFAULT 0,
+                    JAN2026 INTEGER DEFAULT 0,
+                    FEB2026 INTEGER DEFAULT 0,
+                    MAR2026 INTEGER DEFAULT 0,
+                    APR2026 INTEGER DEFAULT 0,
+                    MAY2026 INTEGER DEFAULT 0,
+                    JUN2026 INTEGER DEFAULT 0,
+                    JUL2026 INTEGER DEFAULT 0,
+                    AUG2026 INTEGER DEFAULT 0,
+                    SEP2026 INTEGER DEFAULT 0,
+                    OCT2026 INTEGER DEFAULT 0,
+                    NOV2026 INTEGER DEFAULT 0,
+                    DEC2026 INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Create metadata table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -196,7 +254,12 @@ class RevenueDatabase:
             "CREATE INDEX IF NOT EXISTS idx_block_booking_status ON block_analysis(BookingStatus)",
             "CREATE INDEX IF NOT EXISTS idx_block_srep_code ON block_analysis(SrepCode)",
             "CREATE INDEX IF NOT EXISTS idx_block_company ON block_analysis(CompanyName)",
-            "CREATE INDEX IF NOT EXISTS idx_block_year_month ON block_analysis(Year, Month)"
+            "CREATE INDEX IF NOT EXISTS idx_block_year_month ON block_analysis(Year, Month)",
+            "CREATE INDEX IF NOT EXISTS idx_entered_on_arrival ON entered_on(ARRIVAL)",
+            "CREATE INDEX IF NOT EXISTS idx_entered_on_company ON entered_on(COMPANY_CLEAN)",
+            "CREATE INDEX IF NOT EXISTS idx_entered_on_resv_id ON entered_on(RESV_ID)",
+            "CREATE INDEX IF NOT EXISTS idx_entered_on_split_month ON entered_on(SPLIT_MONTH)",
+            "CREATE INDEX IF NOT EXISTS idx_entered_on_season ON entered_on(SEASON)"
         ]
         
         for index_sql in indexes:
@@ -278,6 +341,163 @@ class RevenueDatabase:
             logger.error(f"Failed to ingest occupancy data: {e}")
             logger.error(f"DataFrame columns: {list(df.columns)}")
             return False
+    
+    def ingest_entered_on_data(self, df: pd.DataFrame) -> bool:
+        """
+        Ingest entered on data into database
+        
+        Args:
+            df: DataFrame with entered on data (from converter)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Ingesting entered on data: {len(df)} rows")
+            
+            # Clean data for database insertion
+            df_clean = df.copy()
+            
+            # Convert date columns to string format for SQLite
+            date_columns = ['ARRIVAL', 'DEPARTURE', 'PERIOD_START', 'PERIOD_END']
+            for col in date_columns:
+                if col in df_clean.columns:
+                    df_clean[col] = pd.to_datetime(df_clean[col]).dt.strftime('%Y-%m-%d')
+            
+            # Handle any column name mismatches
+            if 'C=CHECK' in df_clean.columns:
+                df_clean = df_clean.rename(columns={'C=CHECK': 'C_CHECK'})
+            if 'RESV ID' in df_clean.columns:
+                df_clean = df_clean.rename(columns={'RESV ID': 'RESV_ID'})
+                
+            # Use pandas to_sql for efficient bulk insert
+            df_clean.to_sql('entered_on', self.connection, if_exists='replace', index=False)
+            
+            # Update metadata
+            self._update_metadata('entered_on_last_updated', datetime.now().isoformat())
+            self._update_metadata('entered_on_rows', str(len(df)))
+            
+            self.connection.commit()
+            logger.info("Entered on data ingested successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to ingest entered on data: {e}")
+            logger.error(f"DataFrame columns: {list(df.columns)}")
+            return False
+    
+    def get_entered_on_data(self, company_name: Optional[str] = None, 
+                           start_date: Optional[str] = None, 
+                           end_date: Optional[str] = None) -> pd.DataFrame:
+        """
+        Retrieve entered on data
+        
+        Args:
+            company_name: Filter by company name
+            start_date: Start date filter (YYYY-MM-DD)
+            end_date: End date filter (YYYY-MM-DD)
+            
+        Returns:
+            DataFrame with entered on data
+        """
+        try:
+            query = "SELECT * FROM entered_on"
+            params = []
+            conditions = []
+            
+            if company_name:
+                conditions.append("COMPANY_CLEAN = ?")
+                params.append(company_name)
+            
+            if start_date:
+                conditions.append("ARRIVAL >= ?")
+                params.append(start_date)
+            
+            if end_date:
+                conditions.append("ARRIVAL <= ?")
+                params.append(end_date)
+            
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            
+            query += " ORDER BY ARRIVAL, COMPANY_CLEAN"
+            
+            df = pd.read_sql_query(query, self.connection, params=params)
+            
+            # Convert date columns back to datetime
+            date_columns = ['ARRIVAL', 'DEPARTURE', 'PERIOD_START', 'PERIOD_END']
+            for col in date_columns:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col])
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve entered on data: {e}")
+            return pd.DataFrame()
+    
+    def get_entered_on_summary_stats(self) -> dict:
+        """
+        Get summary statistics for entered on data
+        
+        Returns:
+            Dictionary with entered on data statistics
+        """
+        try:
+            stats = {}
+            
+            # Total bookings and amounts
+            query = """SELECT 
+                        COUNT(DISTINCT RESV_ID) as unique_bookings,
+                        COUNT(*) as total_records,
+                        SUM(AMOUNT_IN_MONTH) as total_amount,
+                        SUM(NIGHTS_IN_MONTH) as total_nights,
+                        AVG(ADR_IN_MONTH) as avg_adr
+                       FROM entered_on"""
+            result = self.connection.execute(query).fetchone()
+            stats['unique_bookings'] = result[0] if result[0] else 0
+            stats['total_records'] = result[1] if result[1] else 0
+            stats['total_amount'] = result[2] if result[2] else 0
+            stats['total_nights'] = result[3] if result[3] else 0
+            stats['avg_adr'] = result[4] if result[4] else 0
+            
+            # Company distribution
+            query = """SELECT COMPANY_CLEAN, COUNT(*) as bookings, SUM(AMOUNT_IN_MONTH) as amount 
+                      FROM entered_on 
+                      GROUP BY COMPANY_CLEAN 
+                      ORDER BY amount DESC 
+                      LIMIT 10"""
+            result = self.connection.execute(query).fetchall()
+            stats['top_companies'] = [{'company': row[0], 'bookings': row[1], 'amount': row[2]} 
+                                    for row in result]
+            
+            # Season distribution
+            query = """SELECT SEASON, COUNT(*) as bookings, SUM(NIGHTS_IN_MONTH) as nights 
+                      FROM entered_on 
+                      GROUP BY SEASON"""
+            result = self.connection.execute(query).fetchall()
+            stats['season_distribution'] = {row[0]: {'bookings': row[1], 'nights': row[2]} 
+                                          for row in result}
+            
+            # Monthly distribution
+            query = """SELECT SPLIT_MONTH, SUM(NIGHTS_IN_MONTH) as nights, SUM(AMOUNT_IN_MONTH) as amount 
+                      FROM entered_on 
+                      GROUP BY SPLIT_MONTH 
+                      ORDER BY SPLIT_MONTH"""
+            result = self.connection.execute(query).fetchall()
+            stats['monthly_distribution'] = [{'month': row[0], 'nights': row[1], 'amount': row[2]} 
+                                           for row in result]
+            
+            # Long bookings
+            query = "SELECT COUNT(*) FROM entered_on WHERE LONG_BOOKING_FLAG = 1"
+            result = self.connection.execute(query).fetchone()
+            stats['long_bookings'] = result[0] if result[0] else 0
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Failed to get entered on summary stats: {e}")
+            return {}
     
     def get_segment_data(self, merged_segment: Optional[str] = None) -> pd.DataFrame:
         """
@@ -438,7 +658,7 @@ class RevenueDatabase:
             cursor = self.connection.cursor()
             
             # Table row counts
-            tables = ['segment_analysis', 'occupancy_analysis', 'forecasts']
+            tables = ['segment_analysis', 'occupancy_analysis', 'forecasts', 'entered_on']
             for table in tables:
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
                 stats[f'{table}_rows'] = cursor.fetchone()[0]

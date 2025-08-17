@@ -2152,6 +2152,927 @@ def events_analysis_tab():
     else:
         st.info("No block data available for events correlation analysis.")
 
+def entered_on_arrivals_tab():
+    """Entered On & Arrivals tab with sub-tabs for entry and arrival analysis"""
+    st.header("📅 Entered On & Arrivals Analysis")
+    
+    if not st.session_state.data_loaded:
+        st.warning("⚠️ Please load data first using the Dashboard tab")
+        return
+    
+    # Create sub-tabs
+    entered_tab, reservations_tab, arrivals_tab = st.tabs(["📝 Entered On", "📋 Reservations Entered", "🚪 Arrivals"])
+    
+    with entered_tab:
+        st.subheader("📝 Entered On Comprehensive Analysis")
+        st.info("Upload and analyze Entered On Excel reports with automatic conversion and comprehensive EDA.")
+        
+        # File upload section with auto-conversion
+        st.markdown("### 📁 Upload Entered On Report")
+        uploaded_file = st.file_uploader(
+            "Choose an Entered On Excel file (.xlsm)",
+            type=['xlsm'],
+            help="Upload an Excel file with 'ENTERED ON' sheet - automatic conversion will begin immediately"
+        )
+        
+        # Auto-convert when file is uploaded
+        if uploaded_file is not None:
+            try:
+                # Save uploaded file temporarily
+                import tempfile
+                import os
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsm') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    temp_path = tmp_file.name
+                
+                # Auto-convert immediately
+                conversion_status = st.empty()
+                conversion_status.info("🔄 Auto-converting Excel file...")
+                
+                try:
+                    # Import converter
+                    import sys
+                    sys.path.append('.')
+                    from converters.entered_on_converter import process_entered_on_report, get_summary_stats
+                    
+                    # Process the file
+                    df, csv_path = process_entered_on_report(temp_path)
+                    conversion_status.success("✅ Auto-conversion completed successfully!")
+                    
+                    # Load to database
+                    db_status = st.empty()
+                    db_status.info("🔄 Loading data to SQL database...")
+                    
+                    if database_available:
+                        db = get_database()
+                        success = db.ingest_entered_on_data(df)
+                        
+                        if success:
+                            db_status.success("✅ Data loaded to SQL database successfully!")
+                            st.session_state.entered_on_data = df
+                        else:
+                            db_status.error("❌ Failed to load data to database")
+                            st.session_state.entered_on_data = df
+                    else:
+                        db_status.warning("⚠️ Database not available - data processed but not stored")
+                        st.session_state.entered_on_data = df
+                    
+                except Exception as e:
+                    conversion_status.error(f"❌ Auto-conversion failed: {str(e)}")
+                    conversion_logger.error(f"Entered On conversion error: {e}")
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                        
+            except Exception as e:
+                st.error(f"Error uploading file: {str(e)}")
+        
+        # Load and display current data
+        entered_on_data = None
+        if database_available:
+            try:
+                db = get_database()
+                entered_on_data = db.get_entered_on_data()
+                if not entered_on_data.empty:
+                    st.session_state.entered_on_data = entered_on_data
+            except Exception as e:
+                conversion_logger.error(f"Failed to load entered on data from database: {e}")
+        
+        # Fallback to session state
+        if entered_on_data is None or entered_on_data.empty:
+            entered_on_data = st.session_state.get('entered_on_data')
+        
+        if entered_on_data is not None and not entered_on_data.empty:
+            # Comprehensive EDA Analysis
+            st.markdown("---")
+            st.markdown("## 📊 Comprehensive EDA Analysis")
+            
+            # 6. Main KPI Cards (AMOUNT total and Room nights)
+            st.markdown("### 📈 *Key Performance Indicators*")
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            total_bookings = len(entered_on_data['RESV_ID'].unique()) if 'RESV_ID' in entered_on_data.columns else len(entered_on_data)
+            total_amount = entered_on_data['AMOUNT_IN_MONTH'].sum()
+            total_nights = entered_on_data['NIGHTS_IN_MONTH'].sum()
+            avg_adr = entered_on_data['ADR_IN_MONTH'].mean()
+            long_bookings = entered_on_data['LONG_BOOKING_FLAG'].sum() if 'LONG_BOOKING_FLAG' in entered_on_data.columns else 0
+            
+            # Custom CSS for much smaller italic KPI text (40% smaller)
+            st.markdown("""
+            <style>
+            /* Target all metric containers globally */
+            [data-testid="metric-container"] {
+                font-style: italic !important;
+                transform: scale(0.6) !important;
+                transform-origin: left top !important;
+                margin-bottom: -20px !important;
+            }
+            
+            /* Target metric labels */
+            [data-testid="metric-container"] > div:first-child {
+                font-size: 0.35rem !important;
+                font-style: italic !important;
+                color: #666 !important;
+            }
+            
+            /* Target metric values */
+            [data-testid="metric-container"] > div:last-child {
+                font-size: 0.5rem !important;
+                font-weight: bold !important;
+                font-style: italic !important;
+            }
+            
+            /* Alternative approach using direct styling */
+            .small-kpi {
+                font-size: 1.02rem !important;
+                font-style: italic !important;
+                text-align: center;
+                padding: 12px;
+            }
+            .small-kpi .label {
+                font-size: 0.88rem !important;
+                color: #666;
+                margin-bottom: 4px;
+            }
+            .small-kpi .value {
+                font-size: 1.28rem !important;
+                font-weight: bold;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            # Use custom HTML for better control
+            kpi_html = f"""
+            <div style="display: flex; justify-content: space-between; gap: 10px;">
+                <div class="small-kpi">
+                    <div class="label">Total Bookings</div>
+                    <div class="value">{total_bookings:,}</div>
+                </div>
+                <div class="small-kpi">
+                    <div class="label">Total Amount</div>
+                    <div class="value">AED {total_amount:,.2f}</div>
+                </div>
+                <div class="small-kpi">
+                    <div class="label">Room Nights</div>
+                    <div class="value">{int(total_nights):,}</div>
+                </div>
+                <div class="small-kpi">
+                    <div class="label">Average ADR</div>
+                    <div class="value">AED {avg_adr:.2f}</div>
+                </div>
+                <div class="small-kpi">
+                    <div class="label">Long Bookings (>10 nights)</div>
+                    <div class="value">{long_bookings:,}</div>
+                </div>
+            </div>
+            """
+            
+            st.markdown(kpi_html, unsafe_allow_html=True)
+            
+            # 7. Top Companies Analysis (AMOUNT multiplied by 1.1 in converter)
+            st.markdown("### 🏢 Top Companies by Amount (with 1.1x multiplier)")
+            if 'COMPANY_CLEAN' in entered_on_data.columns and 'AMOUNT_IN_MONTH' in entered_on_data.columns:
+                company_amounts = entered_on_data.groupby('COMPANY_CLEAN')['AMOUNT_IN_MONTH'].sum().sort_values(ascending=False).head(10)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**Pivoted Table:**")
+                    company_table = pd.DataFrame({
+                        'Company': company_amounts.index,
+                        'Total Amount (AED)': company_amounts.values.round(2)
+                    })
+                    st.dataframe(company_table)
+                
+                with col2:
+                    st.markdown("**Bar Chart:**")
+                    st.bar_chart(company_amounts)
+            
+            # 8. Bookings by INSERT_USER
+            st.markdown("### 👤 Bookings by INSERT_USER")
+            if 'INSERT_USER' in entered_on_data.columns:
+                user_bookings = entered_on_data['INSERT_USER'].value_counts().head(10)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**Table:**")
+                    user_table = pd.DataFrame({
+                        'User': user_bookings.index,
+                        'Booking Count': user_bookings.values
+                    })
+                    st.dataframe(user_table)
+                
+                with col2:
+                    st.markdown("**Bar Chart:**")
+                    st.bar_chart(user_bookings)
+            
+            # 9. Stay Dates Chart
+            st.markdown("### 📅 Stay Dates Distribution")
+            if 'ARRIVAL' in entered_on_data.columns:
+                try:
+                    arrival_dates = pd.to_datetime(entered_on_data['ARRIVAL'])
+                    daily_arrivals = arrival_dates.dt.date.value_counts().sort_index()
+                    st.bar_chart(daily_arrivals)
+                except Exception as e:
+                    st.error(f"Error creating stay dates chart: {e}")
+            
+            # 10. Room Types Analysis (ROOM column)
+            st.markdown("### 🏨 Room Types Booked")
+            if 'ROOM' in entered_on_data.columns:
+                room_counts = entered_on_data['ROOM'].value_counts().head(15)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**Table:**")
+                    room_table = pd.DataFrame({
+                        'Room Type': room_counts.index,
+                        'Count': room_counts.values
+                    })
+                    st.dataframe(room_table)
+                
+                with col2:
+                    st.markdown("**Chart:**")
+                    st.bar_chart(room_counts)
+            
+            # 12. Seasonal EDA (SEASON column)
+            st.markdown("### 🌞 Seasonal Analysis")
+            if 'SEASON' in entered_on_data.columns:
+                seasonal_analysis = entered_on_data.groupby('SEASON').agg({
+                    'NIGHTS_IN_MONTH': 'sum',
+                    'AMOUNT_IN_MONTH': ['sum', 'mean'],
+                    'ADR_IN_MONTH': 'mean'
+                }).round(2)
+                seasonal_analysis.columns = ['Total Nights', 'Total Amount', 'Avg Amount', 'Avg ADR']
+                st.dataframe(seasonal_analysis)
+                
+                # Seasonal distribution chart
+                seasonal_nights = entered_on_data.groupby('SEASON')['NIGHTS_IN_MONTH'].sum()
+                st.bar_chart(seasonal_nights)
+            
+            # 13. Events Analysis (EVENTS_DATES column)
+            st.markdown("### 🎉 Bookings During Events")
+            if 'EVENTS_DATES' in entered_on_data.columns:
+                events_data = entered_on_data[entered_on_data['EVENTS_DATES'].notna() & (entered_on_data['EVENTS_DATES'] != '')]
+                if not events_data.empty:
+                    events_summary = events_data.groupby('EVENTS_DATES').agg({
+                        'RESV_ID': 'count',
+                        'NIGHTS_IN_MONTH': 'sum',
+                        'ADR_IN_MONTH': 'mean'
+                    }).round(2)
+                    events_summary.columns = ['Bookings', 'Nights', 'Average ADR']
+                    st.dataframe(events_summary)
+                else:
+                    st.info("No bookings found during events.")
+            
+            # 14. Interactive Booking Lead Times Analysis
+            st.markdown("### ⏰ Interactive Booking Lead Times")
+            if 'BOOKING_LEAD_TIME' in entered_on_data.columns:
+                lead_times = entered_on_data['BOOKING_LEAD_TIME'].dropna()
+                if not lead_times.empty:
+                    try:
+                        import plotly.express as px
+                        import plotly.graph_objects as go
+                        import numpy as np
+                        
+                        # Create interactive histogram with zoom capabilities
+                        fig = go.Figure()
+                        
+                        fig.add_trace(go.Histogram(
+                            x=lead_times,
+                            nbinsx=30,
+                            name='Lead Times',
+                            marker_color='skyblue',
+                            marker_line_color='darkblue',
+                            marker_line_width=1,
+                            opacity=0.7,
+                            hovertemplate='Lead Time: %{x} days<br>Count: %{y}<extra></extra>'
+                        ))
+                        
+                        fig.update_layout(
+                            title='Interactive Booking Lead Times Distribution',
+                            xaxis_title='Lead Time (Days)',
+                            yaxis_title='Frequency',
+                            height=400,
+                            hovermode='closest',
+                            title_x=0.5
+                        )
+                        
+                        # Add statistical annotations
+                        mean_lead = lead_times.mean()
+                        median_lead = lead_times.median()
+                        
+                        fig.add_vline(x=mean_lead, line_dash="dash", line_color="red", 
+                                    annotation_text=f"Mean: {mean_lead:.1f}d")
+                        fig.add_vline(x=median_lead, line_dash="dash", line_color="green", 
+                                    annotation_text=f"Median: {median_lead:.1f}d")
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Enhanced summary stats with quartiles
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Average Lead Time", f"{lead_times.mean():.1f} days")
+                        with col2:
+                            st.metric("Median Lead Time", f"{lead_times.median():.1f} days")
+                        with col3:
+                            st.metric("25th Percentile", f"{lead_times.quantile(0.25):.1f} days")
+                        with col4:
+                            st.metric("75th Percentile", f"{lead_times.quantile(0.75):.1f} days")
+                        
+                        # Lead time distribution table
+                        st.markdown("**Lead Time Distribution:**")
+                        lead_time_ranges = pd.cut(lead_times, 
+                                                bins=[0, 7, 14, 30, 60, 90, float('inf')], 
+                                                labels=['0-7 days', '8-14 days', '15-30 days', 
+                                                       '31-60 days', '61-90 days', '90+ days'])
+                        range_counts = lead_time_ranges.value_counts().sort_index()
+                        
+                        range_df = pd.DataFrame({
+                            'Lead Time Range': range_counts.index,
+                            'Count': range_counts.values,
+                            'Percentage': (range_counts.values / len(lead_times) * 100).round(1)
+                        })
+                        st.dataframe(range_df, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error(f"Error creating interactive lead times chart: {e}")
+                        st.bar_chart(lead_times.value_counts().head(20))
+            
+            # 15. ADR Descriptive Statistics with Error Handling
+            st.markdown("### 💰 ADR Descriptive Statistics")
+            if 'ADR_IN_MONTH' in entered_on_data.columns and 'SEASON' in entered_on_data.columns:
+                try:
+                    import scipy.stats as stats
+                    import numpy as np
+                    
+                    # Overall ADR stats
+                    adr_data = entered_on_data['ADR_IN_MONTH'].dropna()
+                    
+                    def safe_stat(func, data, default="N/A"):
+                        try:
+                            result = func(data)
+                            return result if not np.isnan(result) else default
+                        except:
+                            return default
+                    
+                    def safe_mode(data):
+                        try:
+                            mode_result = stats.mode(data, keepdims=True)
+                            if len(mode_result.mode) > 0:
+                                return mode_result.mode[0]
+                            return "N/A"
+                        except:
+                            return "N/A"
+                    
+                    stats_dict = {
+                        'Mean': safe_stat(np.mean, adr_data),
+                        'Standard Error': safe_stat(lambda x: stats.sem(x), adr_data),
+                        'Median': safe_stat(np.median, adr_data),
+                        'Mode': safe_mode(adr_data),
+                        'Standard Deviation': safe_stat(np.std, adr_data),
+                        'Sample Variance': safe_stat(np.var, adr_data),
+                        'Kurtosis': safe_stat(stats.kurtosis, adr_data),
+                        'Skewness': safe_stat(stats.skew, adr_data),
+                        'Range': safe_stat(lambda x: np.max(x) - np.min(x), adr_data),
+                        'Minimum': safe_stat(np.min, adr_data),
+                        'Maximum': safe_stat(np.max, adr_data),
+                        'Sum': safe_stat(np.sum, adr_data),
+                        'Count': len(adr_data),
+                        'Largest(1)': safe_stat(np.max, adr_data),
+                        'Smallest(1)': safe_stat(np.min, adr_data),
+                        'Confidence Level(95.0%)': safe_stat(lambda x: 1.96 * stats.sem(x), adr_data)
+                    }
+                    
+                    # Format numeric values
+                    for key, value in stats_dict.items():
+                        if isinstance(value, (int, float)) and value != "N/A":
+                            if key in ['Count']:
+                                stats_dict[key] = f"{int(value):,}"
+                            else:
+                                stats_dict[key] = f"{value:.2f}"
+                    
+                    # Display overall stats
+                    st.markdown("**Overall ADR Statistics:**")
+                    stats_df = pd.DataFrame(list(stats_dict.items()), columns=['Statistic', 'Value'])
+                    st.dataframe(stats_df)
+                    
+                    # Interactive Seasonal ADR Analysis with Plotly
+                    st.markdown("**Interactive Seasonal ADR Analysis:**")
+                    try:
+                        import plotly.express as px
+                        import plotly.graph_objects as go
+                        from plotly.subplots import make_subplots
+                        
+                        # Create subplot with reduced height
+                        fig = make_subplots(
+                            rows=1, cols=2,
+                            subplot_titles=('ADR Distribution by Season', 'ADR Box Plot by Season'),
+                            horizontal_spacing=0.15
+                        )
+                        
+                        seasons = entered_on_data['SEASON'].unique()
+                        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A']
+                        
+                        # Histogram by season
+                        for i, season in enumerate(seasons):
+                            season_adr = entered_on_data[entered_on_data['SEASON'] == season]['ADR_IN_MONTH'].dropna()
+                            if not season_adr.empty:
+                                fig.add_trace(
+                                    go.Histogram(
+                                        x=season_adr,
+                                        name=season,
+                                        opacity=0.7,
+                                        nbinsx=20,
+                                        marker_color=colors[i % len(colors)]
+                                    ),
+                                    row=1, col=1
+                                )
+                        
+                        # Box plot by season  
+                        for i, season in enumerate(seasons):
+                            season_adr = entered_on_data[entered_on_data['SEASON'] == season]['ADR_IN_MONTH'].dropna()
+                            if not season_adr.empty:
+                                fig.add_trace(
+                                    go.Box(
+                                        y=season_adr,
+                                        name=season,
+                                        marker_color=colors[i % len(colors)],
+                                        showlegend=False
+                                    ),
+                                    row=1, col=2
+                                )
+                        
+                        # Update layout with reduced size and zoom capabilities
+                        fig.update_layout(
+                            height=350,  # Reduced height
+                            title_text="Interactive Seasonal ADR Analysis",
+                            title_x=0.5,
+                            barmode='overlay',
+                            hovermode='closest'
+                        )
+                        
+                        # Update x-axis labels
+                        fig.update_xaxes(title_text="ADR (AED)", row=1, col=1)
+                        fig.update_xaxes(title_text="Season", row=1, col=2)
+                        fig.update_yaxes(title_text="Frequency", row=1, col=1)
+                        fig.update_yaxes(title_text="ADR (AED)", row=1, col=2)
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Quick seasonal summary
+                        seasonal_summary = entered_on_data.groupby('SEASON')['ADR_IN_MONTH'].agg(['mean', 'median', 'std', 'count']).round(2)
+                        seasonal_summary.columns = ['Mean ADR', 'Median ADR', 'Std Dev', 'Count']
+                        st.dataframe(seasonal_summary, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error(f"Error creating interactive ADR charts: {e}")
+                        # Fallback to simple bar chart
+                        seasonal_adr = entered_on_data.groupby('SEASON')['ADR_IN_MONTH'].mean()
+                        st.bar_chart(seasonal_adr)
+                        
+                except Exception as e:
+                    st.error(f"Error in ADR analysis: {e}")
+            
+            # 16. Top 5 Companies Monthly Analysis
+            st.markdown("### 🏢📅 Top 5 Companies - Monthly Analysis")
+            if 'COMPANY_CLEAN' in entered_on_data.columns and 'SPLIT_MONTH' in entered_on_data.columns:
+                # Get top 5 companies by total nights
+                top_5_companies = entered_on_data.groupby('COMPANY_CLEAN')['NIGHTS_IN_MONTH'].sum().nlargest(5).index
+                
+                # Filter data for top 5 companies
+                top_company_data = entered_on_data[entered_on_data['COMPANY_CLEAN'].isin(top_5_companies)]
+                
+                # Create company-month analysis
+                company_month_pivot = top_company_data.groupby(['COMPANY_CLEAN', 'SPLIT_MONTH']).agg({
+                    'RESV_ID': 'count',
+                    'NIGHTS_IN_MONTH': 'sum',
+                    'AMOUNT_IN_MONTH': 'sum'
+                }).round(2)
+                company_month_pivot.columns = ['Bookings', 'Nights', 'Amount']
+                
+                # Reset index to work with the data easier
+                company_month_df = company_month_pivot.reset_index()
+                
+                # Convert YYYY-MM to month names
+                def format_month(month_str):
+                    try:
+                        year, month = month_str.split('-')
+                        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                        return f"{month_names[int(month)-1]} {year}"
+                    except:
+                        return month_str
+                
+                company_month_df['Month'] = company_month_df['SPLIT_MONTH'].apply(format_month)
+                
+                # Create pivot table for display
+                display_pivot = company_month_df.pivot(index='COMPANY_CLEAN', columns='Month', values='Nights').fillna(0)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**Monthly Nights by Top 5 Companies:**")
+                    st.dataframe(display_pivot)
+                
+                with col2:
+                    st.markdown("**Company Performance Chart:**")
+                    # Create a stacked bar chart
+                    try:
+                        import plotly.express as px
+                        fig = px.bar(company_month_df, 
+                                   x='Month', 
+                                   y='Nights', 
+                                   color='COMPANY_CLEAN',
+                                   title="Nights by Company and Month",
+                                   height=400)
+                        fig.update_layout(xaxis_tickangle=-45)
+                        st.plotly_chart(fig, use_container_width=True)
+                    except:
+                        # Fallback to simple bar chart
+                        company_totals = company_month_df.groupby('COMPANY_CLEAN')['Nights'].sum()
+                        st.bar_chart(company_totals)
+            
+            # 17. Top 5 Most Booked Months
+            st.markdown("### 📈 Top 5 Most Booked Months (by Split Dates)")
+            if 'SPLIT_MONTH' in entered_on_data.columns:
+                month_bookings = entered_on_data.groupby('SPLIT_MONTH').agg({
+                    'RESV_ID': 'count',
+                    'NIGHTS_IN_MONTH': 'sum',
+                    'AMOUNT_IN_MONTH': 'sum'
+                }).round(2)
+                month_bookings.columns = ['Bookings', 'Total Nights', 'Total Amount']
+                month_bookings = month_bookings.sort_values('Total Nights', ascending=False).head(5)
+                
+                # Convert YYYY-MM to month names
+                def format_month(month_str):
+                    try:
+                        year, month = month_str.split('-')
+                        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                        return f"{month_names[int(month)-1]} {year}"
+                    except:
+                        return month_str
+                
+                month_bookings.index = [format_month(idx) for idx in month_bookings.index]
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.dataframe(month_bookings)
+                with col2:
+                    st.bar_chart(month_bookings['Total Nights'])
+            
+            # 19. Enhanced Calendar Heatmap - Top 10 Companies by Booked Nights
+            st.markdown("### 🔥 Interactive Calendar Heatmap - Top 10 Companies by Booked Nights")
+            if 'COMPANY_CLEAN' in entered_on_data.columns and 'ARRIVAL' in entered_on_data.columns:
+                try:
+                    import plotly.express as px
+                    import plotly.graph_objects as go
+                    from plotly.subplots import make_subplots
+                    
+                    # Get top 10 companies by nights
+                    top_companies = entered_on_data.groupby('COMPANY_CLEAN')['NIGHTS_IN_MONTH'].sum().nlargest(10)
+                    
+                    # Filter data for top companies
+                    top_company_data = entered_on_data[entered_on_data['COMPANY_CLEAN'].isin(top_companies.index)]
+                    
+                    # Create detailed booking data for heatmap
+                    top_company_data['ARRIVAL_DATE'] = pd.to_datetime(top_company_data['ARRIVAL']).dt.date
+                    
+                    # Aggregate data showing both nights and booking count
+                    heatmap_summary = top_company_data.groupby(['ARRIVAL_DATE', 'COMPANY_CLEAN']).agg({
+                        'NIGHTS_IN_MONTH': 'sum',
+                        'RESV_ID': 'count'
+                    }).reset_index()
+                    heatmap_summary.columns = ['Date', 'Company', 'Nights', 'Bookings']
+                    
+                    if not heatmap_summary.empty:
+                        # Create interactive heatmap with Plotly
+                        heatmap_pivot = heatmap_summary.pivot(index='Company', columns='Date', values='Nights').fillna(0)
+                        bookings_pivot = heatmap_summary.pivot(index='Company', columns='Date', values='Bookings').fillna(0)
+                        
+                        # Create hover text with both nights and bookings
+                        hover_text = []
+                        for i, company in enumerate(heatmap_pivot.index):
+                            hover_row = []
+                            for j, date in enumerate(heatmap_pivot.columns):
+                                nights = heatmap_pivot.iloc[i, j]
+                                bookings = bookings_pivot.iloc[i, j]
+                                if nights > 0:
+                                    hover_row.append(f"Company: {company}<br>Date: {date}<br>Nights: {nights}<br>Bookings: {bookings}")
+                                else:
+                                    hover_row.append(f"Company: {company}<br>Date: {date}<br>No bookings")
+                            hover_text.append(hover_row)
+                        
+                        fig = go.Figure(data=go.Heatmap(
+                            z=heatmap_pivot.values,
+                            x=[str(d) for d in heatmap_pivot.columns],
+                            y=heatmap_pivot.index,
+                            text=heatmap_pivot.values,
+                            texttemplate="%{text}",
+                            textfont={"size": 10},
+                            hovertemplate='%{customdata}<extra></extra>',
+                            customdata=hover_text,
+                            colorscale='Reds',
+                            colorbar=dict(title="Nights Booked")
+                        ))
+                        
+                        fig.update_layout(
+                            title={
+                                'text': 'Top 10 Companies - Interactive Booking Heatmap',
+                                'x': 0.5,
+                                'xanchor': 'center'
+                            },
+                            xaxis_title="Date",
+                            yaxis_title="Company",
+                            height=500,
+                            xaxis=dict(tickangle=45),
+                            font=dict(size=10)
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Show booking summary statistics
+                        st.markdown("**📊 Booking Summary:**")
+                        summary_stats = top_company_data.groupby('COMPANY_CLEAN').agg({
+                            'NIGHTS_IN_MONTH': 'sum',
+                            'RESV_ID': 'count',
+                            'AMOUNT_IN_MONTH': 'sum'
+                        }).round(2)
+                        summary_stats.columns = ['Total Nights', 'Total Bookings', 'Total Revenue']
+                        summary_stats = summary_stats.sort_values('Total Nights', ascending=False)
+                        st.dataframe(summary_stats, use_container_width=True)
+                        
+                    else:
+                        st.info("Insufficient data for heatmap visualization.")
+                        
+                except Exception as e:
+                    st.error(f"Error creating interactive heatmap: {e}")
+                    # Fallback to simple chart
+                    if 'COMPANY_CLEAN' in entered_on_data.columns:
+                        top_companies = entered_on_data.groupby('COMPANY_CLEAN')['NIGHTS_IN_MONTH'].sum().nlargest(10)
+                        st.bar_chart(top_companies)
+            
+        else:
+            st.info("No Entered On data available. Please upload an Excel file to get started.")
+    
+    with reservations_tab:
+        st.subheader("📋 Reservations Entered - SQL Data View")
+        st.info("View and analyze converted reservation data loaded into SQL database with conditional formatting.")
+        
+        # Load data from database
+        entered_on_data = None
+        if database_available:
+            try:
+                db = get_database()
+                entered_on_data = db.get_entered_on_data()
+                if not entered_on_data.empty:
+                    st.success(f"✅ Loaded {len(entered_on_data)} reservations from SQL database")
+                else:
+                    st.warning("⚠️ No reservations found in database")
+            except Exception as e:
+                st.error(f"❌ Failed to load from database: {e}")
+        else:
+            # Fallback to session state
+            entered_on_data = st.session_state.get('entered_on_data')
+            if entered_on_data is not None and not entered_on_data.empty:
+                st.info("📊 Showing data from session state")
+        
+        if entered_on_data is not None and not entered_on_data.empty:
+            # Display key metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                total_reservations = len(entered_on_data)
+                st.metric("Total Reservations", f"{total_reservations:,}")
+            with col2:
+                total_revenue = entered_on_data['AMOUNT_IN_MONTH'].sum()
+                st.metric("Total Revenue", f"AED {total_revenue:,.2f}")
+            with col3:
+                avg_adr = entered_on_data['ADR_IN_MONTH'].mean()
+                st.metric("Average ADR", f"AED {avg_adr:.2f}")
+            with col4:
+                avg_nights = entered_on_data['NIGHTS_IN_MONTH'].mean()
+                st.metric("Avg Stay Length", f"{avg_nights:.1f} nights")
+            
+            st.markdown("---")
+            
+            # Filters for data view
+            st.markdown("### 🔍 Data Filters")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Company filter
+                companies = ['All'] + sorted(entered_on_data['COMPANY_CLEAN'].unique().tolist())
+                selected_company = st.selectbox("Filter by Company:", companies, key="res_company_filter")
+            
+            with col2:
+                # Season filter
+                seasons = ['All'] + sorted(entered_on_data['SEASON'].unique().tolist())
+                selected_season = st.selectbox("Filter by Season:", seasons, key="res_season_filter")
+            
+            with col3:
+                # Booking status filter (if available)
+                if 'SHORT_RESV_STATUS' in entered_on_data.columns:
+                    statuses = ['All'] + sorted(entered_on_data['SHORT_RESV_STATUS'].unique().tolist())
+                    selected_status = st.selectbox("Filter by Status:", statuses, key="res_status_filter")
+                else:
+                    selected_status = 'All'
+            
+            # Apply filters
+            filtered_data = entered_on_data.copy()
+            
+            if selected_company != 'All':
+                filtered_data = filtered_data[filtered_data['COMPANY_CLEAN'] == selected_company]
+            
+            if selected_season != 'All':
+                filtered_data = filtered_data[filtered_data['SEASON'] == selected_season]
+            
+            if selected_status != 'All' and 'SHORT_RESV_STATUS' in filtered_data.columns:
+                filtered_data = filtered_data[filtered_data['SHORT_RESV_STATUS'] == selected_status]
+            
+            st.markdown(f"### 📊 Filtered Data View ({len(filtered_data):,} reservations)")
+            
+            # Display columns selector
+            all_columns = filtered_data.columns.tolist()
+            key_columns = ['FULL_NAME', 'ARRIVAL', 'DEPARTURE', 'NIGHTS', 'AMOUNT', 'ADR_IN_MONTH', 
+                          'COMPANY_CLEAN', 'SEASON', 'SHORT_RESV_STATUS', 'ROOM', 'SPLIT_MONTH']
+            available_key_columns = [col for col in key_columns if col in all_columns]
+            
+            with st.expander("🔧 Customize Display Columns"):
+                selected_columns = st.multiselect(
+                    "Select columns to display:",
+                    options=all_columns,
+                    default=available_key_columns,
+                    key="res_columns_selector"
+                )
+            
+            if not selected_columns:
+                selected_columns = available_key_columns
+            
+            # Conditional formatting function
+            def highlight_reservations(row):
+                """Apply conditional formatting to reservations"""
+                styles = [''] * len(row)
+                
+                # Highlight long bookings (>10 nights)
+                if 'NIGHTS' in row.index and pd.notna(row['NIGHTS']) and row['NIGHTS'] > 10:
+                    nights_idx = row.index.get_loc('NIGHTS')
+                    styles[nights_idx] = 'background-color: #ffcccc; font-weight: bold;'  # Light red
+                
+                # Highlight high ADR (>400 AED)
+                if 'ADR_IN_MONTH' in row.index and pd.notna(row['ADR_IN_MONTH']) and row['ADR_IN_MONTH'] > 400:
+                    adr_idx = row.index.get_loc('ADR_IN_MONTH')
+                    styles[adr_idx] = 'background-color: #ccffcc; font-weight: bold;'  # Light green
+                
+                # Highlight cancelled bookings
+                if 'SHORT_RESV_STATUS' in row.index and pd.notna(row['SHORT_RESV_STATUS']) and 'CXL' in str(row['SHORT_RESV_STATUS']):
+                    status_idx = row.index.get_loc('SHORT_RESV_STATUS')
+                    styles[status_idx] = 'background-color: #ffffcc; font-weight: bold;'  # Light yellow
+                
+                # Highlight winter season
+                if 'SEASON' in row.index and pd.notna(row['SEASON']) and row['SEASON'] == 'Winter':
+                    season_idx = row.index.get_loc('SEASON')
+                    styles[season_idx] = 'background-color: #e6f3ff; font-weight: bold;'  # Light blue
+                
+                return styles
+            
+            # Display data with conditional formatting
+            display_data = filtered_data[selected_columns].copy()
+            
+            # Format numeric columns for better display
+            if 'AMOUNT' in display_data.columns:
+                display_data['AMOUNT'] = display_data['AMOUNT'].apply(lambda x: f"AED {x:,.2f}" if pd.notna(x) else "")
+            if 'ADR_IN_MONTH' in display_data.columns:
+                display_data['ADR_IN_MONTH'] = display_data['ADR_IN_MONTH'].apply(lambda x: f"AED {x:,.2f}" if pd.notna(x) else "")
+            if 'AMOUNT_IN_MONTH' in display_data.columns:
+                display_data['AMOUNT_IN_MONTH'] = display_data['AMOUNT_IN_MONTH'].apply(lambda x: f"AED {x:,.2f}" if pd.notna(x) else "")
+            
+            try:
+                # Apply conditional formatting
+                styled_data = display_data.style.apply(highlight_reservations, axis=1)
+                st.dataframe(styled_data, use_container_width=True, height=600)
+            except:
+                # Fallback without styling if there are issues
+                st.dataframe(display_data, use_container_width=True, height=600)
+            
+            # Formatting legend
+            st.markdown("#### 🎨 Conditional Formatting Legend:")
+            legend_cols = st.columns(4)
+            with legend_cols[0]:
+                st.markdown('<div style="background-color: #ffcccc; padding: 5px; border-radius: 3px;">🔴 Long Bookings (>10 nights)</div>', unsafe_allow_html=True)
+            with legend_cols[1]:
+                st.markdown('<div style="background-color: #ccffcc; padding: 5px; border-radius: 3px;">🟢 High ADR (>400 AED)</div>', unsafe_allow_html=True)
+            with legend_cols[2]:
+                st.markdown('<div style="background-color: #ffffcc; padding: 5px; border-radius: 3px;">🟡 Cancelled Bookings</div>', unsafe_allow_html=True)
+            with legend_cols[3]:
+                st.markdown('<div style="background-color: #e6f3ff; padding: 5px; border-radius: 3px;">🔵 Winter Season</div>', unsafe_allow_html=True)
+            
+            # Export option
+            st.markdown("---")
+            if st.button("📥 Download Filtered Data as CSV"):
+                csv = display_data.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name=f"reservations_filtered_{len(filtered_data)}_records.csv",
+                    mime="text/csv"
+                )
+            
+        else:
+            st.info("📝 No reservation data available. Please upload data in the 'Entered On' tab first.")
+    
+    with arrivals_tab:
+        st.subheader("🚪 Arrivals Analysis")
+        st.info("This section analyzes guest arrival patterns and timing")
+        
+        try:
+            # Get the data
+            segment_data = st.session_state.get('segment_data')
+            occupancy_data = st.session_state.get('occupancy_data')
+            
+            if segment_data is not None and not segment_data.empty:
+                # Check for arrival date columns
+                arrival_cols = [col for col in segment_data.columns if 'arrival' in col.lower() or 'checkin' in col.lower() or 'check-in' in col.lower()]
+                
+                if arrival_cols:
+                    st.write("**Available arrival columns:**")
+                    for col in arrival_cols:
+                        st.write(f"- {col}")
+                    
+                    # Display data preview
+                    st.write("**Data Preview:**")
+                    st.dataframe(segment_data[arrival_cols + ['RoomType', 'Pax']].head(10))
+                    
+                    # Basic analysis
+                    if len(arrival_cols) > 0:
+                        main_col = arrival_cols[0]
+                        if segment_data[main_col].dtype == 'object':
+                            try:
+                                # Try to convert to datetime
+                                segment_data[main_col] = pd.to_datetime(segment_data[main_col])
+                                
+                                # Arrival patterns
+                                st.write("**Daily Arrival Patterns:**")
+                                arrival_counts = segment_data.groupby(segment_data[main_col].dt.date).size()
+                                st.line_chart(arrival_counts)
+                                
+                                # Weekly patterns
+                                st.write("**Day of Week Arrival Patterns:**")
+                                dow_arrivals = segment_data.groupby(segment_data[main_col].dt.day_name()).size()
+                                st.bar_chart(dow_arrivals)
+                                
+                                # Arrival statistics
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Total Arrivals", len(segment_data))
+                                with col2:
+                                    earliest_arrival = segment_data[main_col].min()
+                                    st.metric("Earliest Arrival", earliest_arrival.strftime('%Y-%m-%d') if pd.notna(earliest_arrival) else "N/A")
+                                with col3:
+                                    latest_arrival = segment_data[main_col].max()
+                                    st.metric("Latest Arrival", latest_arrival.strftime('%Y-%m-%d') if pd.notna(latest_arrival) else "N/A")
+                                with col4:
+                                    avg_guests = segment_data['Pax'].mean() if 'Pax' in segment_data.columns else 0
+                                    st.metric("Avg Guests/Booking", f"{avg_guests:.1f}")
+                                
+                                # Monthly arrival breakdown
+                                st.write("**Monthly Arrival Breakdown:**")
+                                monthly_arrivals = segment_data.groupby(segment_data[main_col].dt.to_period('M')).agg({
+                                    'Pax': 'sum',
+                                    main_col: 'count'
+                                }).rename(columns={main_col: 'Bookings'})
+                                st.dataframe(monthly_arrivals)
+                                
+                            except:
+                                st.write(f"**{main_col} Sample Values:**")
+                                st.write(segment_data[main_col].value_counts().head())
+                else:
+                    st.info("No 'Arrival' columns found in the data. Available columns:")
+                    st.write(list(segment_data.columns))
+                    
+                    # Try to use occupancy data for arrival analysis
+                    if occupancy_data is not None and not occupancy_data.empty:
+                        st.write("**Using Occupancy Data for Arrival Analysis:**")
+                        
+                        # Assuming Date column exists in occupancy data
+                        if 'Date' in occupancy_data.columns:
+                            try:
+                                occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                                
+                                # Daily occupancy as proxy for arrivals
+                                st.write("**Daily Occupancy (Proxy for Arrivals):**")
+                                occ_cols = [col for col in occupancy_data.columns if 'occ' in col.lower() and col != 'Date']
+                                if occ_cols:
+                                    daily_occ = occupancy_data.set_index('Date')[occ_cols[0]]
+                                    st.line_chart(daily_occ)
+                                
+                            except Exception as e:
+                                st.warning(f"Could not process occupancy data: {str(e)}")
+            else:
+                st.warning("No segment data available for arrival analysis")
+                
+        except Exception as e:
+            st.error(f"Error in Arrivals analysis: {str(e)}")
+
 def historical_forecast_tab():
     """Historical & Forecast tab with sub-tabs for analysis and forecasting"""
     st.header("📊 Historical & Forecast Analysis")
@@ -3991,6 +4912,7 @@ def main():
             "Block Analysis",
             "Block Dashboard", 
             "Events Analysis",
+            "Entered On & Arrivals",
             "Historical & Forecast",
             "Enhanced Forecasting",
             "Machine Learning",
@@ -4056,6 +4978,8 @@ def main():
         block_dashboard_tab()
     elif current_tab == "Events Analysis":
         events_analysis_tab()
+    elif current_tab == "Entered On & Arrivals":
+        entered_on_arrivals_tab()
     elif current_tab == "Historical & Forecast":
         historical_forecast_tab()
     elif current_tab == "Enhanced Forecasting":

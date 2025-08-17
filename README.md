@@ -22,28 +22,30 @@ A comprehensive Streamlit-based dashboard for analyzing MHR (Monthly Hotel Reven
 ### Option 1: Run from Source
 
 1. **Clone and Setup**
+
    ```bash
    cd "Revenue Architecture"
    pip install -r requirements.txt
    ```
-
 2. **Launch Application**
+
    ```bash
    python scripts/launcher.py
    ```
-
 3. **Access Dashboard**
+
    - PyWebView window opens automatically (if available)
    - Or visit http://localhost:8501 in your browser
 
 ### Option 2: Use Standalone Executable
 
 1. **Build Executable**
+
    ```bash
    python build_executable.py
    ```
-
 2. **Run Executable**
+
    ```bash
    cd dist
    ./GrandMillenniumAnalytics  # Linux/Mac
@@ -54,6 +56,7 @@ A comprehensive Streamlit-based dashboard for analyzing MHR (Monthly Hotel Reven
 ## 📋 Requirements
 
 ### Core Dependencies
+
 - Python 3.10+
 - pandas (>=1.5), numpy (>=1.23)
 - streamlit (>=1.20)
@@ -63,6 +66,7 @@ A comprehensive Streamlit-based dashboard for analyzing MHR (Monthly Hotel Reven
 - openpyxl (>=3.0)
 
 ### Optional Dependencies
+
 - pywebview (>=4.0) - for native window
 - pyinstaller (>=5.9) - for executable packaging
 - pytest (>=7.0) - for testing
@@ -72,7 +76,7 @@ A comprehensive Streamlit-based dashboard for analyzing MHR (Monthly Hotel Reven
 ```
 Revenue Architecture/
 ├── app/                          # Main application
-│   ├── streamlit_app.py         # Streamlit dashboard
+│   ├── streamlit_app_simple.py      # Streamlit dashboard
 │   ├── database.py              # SQLite management
 │   ├── forecasting.py           # Time series forecasting
 │   └── logging_config.py        # Logging setup
@@ -99,6 +103,7 @@ Revenue Architecture/
 ## 📊 Dashboard Tabs
 
 ### 1. Loading Tab
+
 - **File Upload**: Drag-and-drop or select Excel files
 - **Converter Execution**: Run segment and occupancy processors
 - **Progress Tracking**: Real-time progress bars and logging
@@ -106,6 +111,7 @@ Revenue Architecture/
 - **Validation**: Automated data quality checks
 
 ### 2. Daily Occupancy Tab
+
 - **Key Metrics**: Occupancy %, Revenue, ADR, RevPAR
 - **Trend Charts**: Interactive time series with forecasting
 - **Data Validation**: Missing days, high occupancy warnings
@@ -113,6 +119,7 @@ Revenue Architecture/
 - **Paginated Tables**: Formatted data display
 
 ### 3. Segment Analysis Tab
+
 - **Performance KPIs**: Total and average revenue metrics
 - **Top Segments**: Revenue rankings and market share
 - **Time Series**: Revenue trends by segment
@@ -120,6 +127,7 @@ Revenue Architecture/
 - **3-Month Forecast**: Revenue predictions by segment
 
 ### 4. ADR Analysis Tab
+
 - **Statistical Summary**: Mean, median, quartiles, standard deviation
 - **Distribution Charts**: Histograms with adjustable bins
 - **Segment Boxplots**: ADR distribution by customer segment
@@ -127,6 +135,7 @@ Revenue Architecture/
 - **Comparative Analysis**: Cross-dataset ADR comparison
 
 ### 5. Block Analysis Tab
+
 - **File Upload**: Process TXT block data files with validation
 - **Calendar Heatmap**: Companies vs dates visualization with block intensity
 - **EDA Visualizations**: Booking status distribution, monthly trends, top companies
@@ -134,12 +143,14 @@ Revenue Architecture/
 - **Weekly Patterns**: Day-of-week analysis and comprehensive data tables
 
 ### 6. Block Dashboard Tab
+
 - **KPI Metrics**: Total blocks, confirmed blocks, prospect blocks, conversion rates
 - **Interactive Analytics**: Block booking timeline and sales rep performance
 - **Business Mix Analysis**: Breakdown by booking status with statistics
 - **Pipeline Analysis**: Future bookings forecasting and status funnel visualization
 
 ### 7. Events Analysis Tab
+
 - **Dubai Events Calendar**: 8 major events (Aug 2025 - Jan 2026) timeline
 - **Occupancy Correlation**: Smart detection of high occupancy periods during events
 - **Block Booking Analysis**: Cross-reference ALLOTMENT_DATE and BEGIN_DATE with events
@@ -147,6 +158,7 @@ Revenue Architecture/
 - **Interactive Thresholds**: Adjustable occupancy thresholds for analysis
 
 ### 8. Controls & Logs Tab
+
 - **Cache Management**: Clear and reload data
 - **Database Statistics**: Row counts and last updated times
 - **Log Viewers**: Real-time conversion and application logs
@@ -155,13 +167,17 @@ Revenue Architecture/
 ## 🔄 Data Processing Flow
 
 ### Primary Flow
+
 1. **Excel Upload** → 2. **Segment Converter** → 3. **Occupancy Converter** → 4. **Segment Mapping** → 5. **SQLite Ingestion** → 6. **Dashboard Analytics**
 
-### Block Data Flow  
+### Block Data Flow
+
 1. **TXT Upload** → 2. **Block Converter** → 3. **Data Cleaning & Validation** → 4. **SQLite Ingestion** → 5. **Block Analytics & Events Correlation**
 
 ### Segment Mapping
+
 Original segments are mapped to consolidated categories:
+
 - **Retail**: Unmanaged/Leisure, Package, Third Party
 - **Corporate**: Managed Corporate, Government
 - **Leisure**: Wholesale Fixed Value
@@ -169,16 +185,17 @@ Original segments are mapped to consolidated categories:
 - **Contract**: Contract bookings
 - **Complimentary**: Complimentary stays
 
-
 ## 🔮 Forecasting Models
 
 ### Occupancy Forecasting
+
 - **Method**: ExponentialSmoothing with trend
 - **Horizon**: Today to end of current month
 - **Confidence Intervals**: 95% confidence ribbons
 - **Fallback**: Linear trend if insufficient data
 
 ### Revenue Forecasting
+
 - **Method**: ExponentialSmoothing by segment
 - **Horizon**: 3 months from today
 - **Granularity**: Monthly predictions
@@ -219,6 +236,7 @@ cd dist
 ## 🔧 Configuration
 
 ### Launcher Options
+
 ```bash
 python scripts/launcher.py --help
 
@@ -230,12 +248,14 @@ Options:
 ```
 
 ### Environment Variables
+
 - `STREAMLIT_SERVER_PORT`: Override default port
 - `PYTHONPATH`: Include project root for imports
 
 ## 📝 Logging
 
 Two separate log files are maintained:
+
 - **conversion.log**: Data converter operations
 - **app.log**: Streamlit application events
 
@@ -246,25 +266,27 @@ Logs use rotating file handlers (10MB max, 5 backups) and are viewable in the da
 ### Common Issues
 
 1. **PyWebView not opening**
+
    - Install: `pip install pywebview`
    - Use: `python scripts/launcher.py --no-webview`
-
 2. **Conversion failures**
+
    - Check Excel file has DPR sheet
    - Verify file is not corrupted
    - Review conversion.log for details
-
 3. **Memory issues with large files**
+
    - Close other applications
    - Process files individually
    - Use 64-bit Python
-
 4. **Database connection errors**
+
    - Ensure db/ directory is writable
    - Check disk space
    - Restart application
 
 ### Performance Tips
+
 - Use SSD storage for database files
 - Close unused browser tabs when using web interface
 - Process smaller date ranges for large datasets
@@ -273,10 +295,11 @@ Logs use rotating file handlers (10MB max, 5 backups) and are viewable in the da
 ## 📈 Data Specifications
 
 ### Input Requirements
+
 - **Excel Format**: (.xlsm, .xlsx) with DPR sheet for segment/occupancy data
 - **Block Data Format**: Tab-separated TXT files with columns:
   - BLOCKSIZE (integer): Number of rooms booked
-  - ALLOTMENT_DATE: Date when blocks were made  
+  - ALLOTMENT_DATE: Date when blocks were made
   - SREP_CODE: Account owner/sales rep name
   - BOOKING_STATUS: ACT/DEF/PSP/TEN status codes
   - DESCRIPTION: Company name
@@ -285,6 +308,7 @@ Logs use rotating file handlers (10MB max, 5 backups) and are viewable in the da
 - **Segments**: Must include standard 15 segments
 
 ### Output Formats
+
 - **Segment CSV**: 180 rows (15 segments × 12 months), 49+ columns
 - **Occupancy CSV**: 365 rows (daily), 9+ columns
 - **Block Data CSV**: Variable rows (timestamped), standardized columns
@@ -296,8 +320,9 @@ Logs use rotating file handlers (10MB max, 5 backups) and are viewable in the da
 The Events Analysis tab tracks 8 major Dubai events and their impact on hotel bookings:
 
 ### Events Covered (Aug 2025 - Jan 2026)
+
 - **Dubai International Film Festival** (Aug 30, 2025)
-- **Sleep Expo Middle East** (Sep 15-17, 2025)  
+- **Sleep Expo Middle East** (Sep 15-17, 2025)
 - **Dubai PodFest** (Sep 30, 2025)
 - **Gulf Food Manufacturing** (Sep 29 - Oct 1, 2025)
 - **GITEX Global** (Oct 13-17, 2025) - Major technology event
@@ -306,8 +331,9 @@ The Events Analysis tab tracks 8 major Dubai events and their impact on hotel bo
 - **World Sports Summit** (Dec 29-30, 2025)
 
 ### Analytics Features
+
 - **Correlation Analysis**: Automatically detects bookings coinciding with events
-- **Occupancy Impact**: Shows occupancy spikes during event periods  
+- **Occupancy Impact**: Shows occupancy spikes during event periods
 - **Booking Patterns**: Tracks both booking dates (ALLOTMENT_DATE) and stay dates (BEGIN_DATE)
 - **Visual Timeline**: Interactive event calendar with booking overlays
 - **Smart Thresholds**: Configurable occupancy thresholds for event impact analysis
@@ -317,15 +343,17 @@ The Events Analysis tab tracks 8 major Dubai events and their impact on hotel bo
 Based on the Group Forecast Excel structure, the calendar heatmap provides:
 
 ### Visualization Structure
+
 - **Rows**: Top 20 companies by total block size
 - **Columns**: Allotment dates (calendar view)
 - **Color Intensity**: Block sizes (darker = more blocks)
 - **Interactive**: Hover for company, date, and block details
 
 ### Use Cases
+
 - **Capacity Planning**: Visualize booking density across time
 - **Company Analysis**: Identify top block booking companies
-- **Pattern Recognition**: Spot seasonal or event-driven booking patterns  
+- **Pattern Recognition**: Spot seasonal or event-driven booking patterns
 - **Resource Allocation**: Plan staffing and services based on booking patterns
 
 ## 🤝 Contributing
