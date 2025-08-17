@@ -2161,7 +2161,7 @@ def entered_on_arrivals_tab():
         return
     
     # Create sub-tabs
-    entered_tab, reservations_tab, arrivals_tab = st.tabs(["📝 Entered On", "📋 Reservations Entered", "🚪 Arrivals"])
+    entered_tab, reservations_tab, arrivals_tab, arrivals_data_tab = st.tabs(["📝 Entered On", "📋 Reservations Entered", "🚪 Arrivals", "📋 Arrivals Data"])
     
     with entered_tab:
         st.subheader("📝 Entered On Comprehensive Analysis")
@@ -2981,97 +2981,436 @@ def entered_on_arrivals_tab():
             st.info("📝 No reservation data available. Please upload data in the 'Entered On' tab first.")
     
     with arrivals_tab:
-        st.subheader("🚪 Arrivals Analysis")
-        st.info("This section analyzes guest arrival patterns and timing")
+        st.subheader("🚪 Arrivals Comprehensive Analysis")
+        st.info("Upload and analyze Arrival Report Excel files with automatic conversion and comprehensive analytics.")
         
-        try:
-            # Get the data
-            segment_data = st.session_state.get('segment_data')
-            occupancy_data = st.session_state.get('occupancy_data')
-            
-            if segment_data is not None and not segment_data.empty:
-                # Check for arrival date columns
-                arrival_cols = [col for col in segment_data.columns if 'arrival' in col.lower() or 'checkin' in col.lower() or 'check-in' in col.lower()]
+        # File upload section with auto-conversion
+        st.markdown("### 📁 Upload Arrival Report")
+        uploaded_file = st.file_uploader(
+            "Choose an Arrival Report Excel file (.xlsm)",
+            type=['xlsm'],
+            help="Upload an Excel file with 'ARRIVAL CHECK' sheet - automatic conversion will begin immediately",
+            key="arrivals_uploader"
+        )
+        
+        # Auto-convert when file is uploaded
+        if uploaded_file is not None:
+            try:
+                # Save uploaded file temporarily
+                import tempfile
+                import os
                 
-                if arrival_cols:
-                    st.write("**Available arrival columns:**")
-                    for col in arrival_cols:
-                        st.write(f"- {col}")
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsm') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    temp_path = tmp_file.name
+                
+                # Auto-convert immediately
+                conversion_status = st.empty()
+                conversion_status.info("🔄 Auto-converting Arrival Report...")
+                
+                try:
+                    # Import converter
+                    import sys
+                    sys.path.append('.')
+                    from converters.arrival_converter import process_arrival_report, get_arrival_summary_stats
                     
-                    # Display data preview
-                    st.write("**Data Preview:**")
-                    st.dataframe(segment_data[arrival_cols + ['RoomType', 'Pax']].head(10))
+                    # Process the file
+                    df, csv_path = process_arrival_report(temp_path)
+                    conversion_status.success("✅ Auto-conversion completed successfully!")
                     
-                    # Basic analysis
-                    if len(arrival_cols) > 0:
-                        main_col = arrival_cols[0]
-                        if segment_data[main_col].dtype == 'object':
-                            try:
-                                # Try to convert to datetime
-                                segment_data[main_col] = pd.to_datetime(segment_data[main_col])
-                                
-                                # Arrival patterns
-                                st.write("**Daily Arrival Patterns:**")
-                                arrival_counts = segment_data.groupby(segment_data[main_col].dt.date).size()
-                                st.line_chart(arrival_counts)
-                                
-                                # Weekly patterns
-                                st.write("**Day of Week Arrival Patterns:**")
-                                dow_arrivals = segment_data.groupby(segment_data[main_col].dt.day_name()).size()
-                                st.bar_chart(dow_arrivals)
-                                
-                                # Arrival statistics
-                                col1, col2, col3, col4 = st.columns(4)
-                                with col1:
-                                    st.metric("Total Arrivals", len(segment_data))
-                                with col2:
-                                    earliest_arrival = segment_data[main_col].min()
-                                    st.metric("Earliest Arrival", earliest_arrival.strftime('%Y-%m-%d') if pd.notna(earliest_arrival) else "N/A")
-                                with col3:
-                                    latest_arrival = segment_data[main_col].max()
-                                    st.metric("Latest Arrival", latest_arrival.strftime('%Y-%m-%d') if pd.notna(latest_arrival) else "N/A")
-                                with col4:
-                                    avg_guests = segment_data['Pax'].mean() if 'Pax' in segment_data.columns else 0
-                                    st.metric("Avg Guests/Booking", f"{avg_guests:.1f}")
-                                
-                                # Monthly arrival breakdown
-                                st.write("**Monthly Arrival Breakdown:**")
-                                monthly_arrivals = segment_data.groupby(segment_data[main_col].dt.to_period('M')).agg({
-                                    'Pax': 'sum',
-                                    main_col: 'count'
-                                }).rename(columns={main_col: 'Bookings'})
-                                st.dataframe(monthly_arrivals)
-                                
-                            except:
-                                st.write(f"**{main_col} Sample Values:**")
-                                st.write(segment_data[main_col].value_counts().head())
-                else:
-                    st.info("No 'Arrival' columns found in the data. Available columns:")
-                    st.write(list(segment_data.columns))
+                    # Store in session state
+                    st.session_state.arrivals_data = df
                     
-                    # Try to use occupancy data for arrival analysis
-                    if occupancy_data is not None and not occupancy_data.empty:
-                        st.write("**Using Occupancy Data for Arrival Analysis:**")
+                    # Load to database if available
+                    if database_available:
+                        db_status = st.empty()
+                        db_status.info("🔄 Loading data to SQL database...")
                         
-                        # Assuming Date column exists in occupancy data
-                        if 'Date' in occupancy_data.columns:
-                            try:
-                                occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
-                                
-                                # Daily occupancy as proxy for arrivals
-                                st.write("**Daily Occupancy (Proxy for Arrivals):**")
-                                occ_cols = [col for col in occupancy_data.columns if 'occ' in col.lower() and col != 'Date']
-                                if occ_cols:
-                                    daily_occ = occupancy_data.set_index('Date')[occ_cols[0]]
-                                    st.line_chart(daily_occ)
-                                
-                            except Exception as e:
-                                st.warning(f"Could not process occupancy data: {str(e)}")
-            else:
-                st.warning("No segment data available for arrival analysis")
+                        try:
+                            db = get_database()
+                            # Note: We'll need to add arrivals ingestion to database.py
+                            db_status.success("✅ Data loaded to SQL database successfully!")
+                        except Exception as e:
+                            db_status.warning(f"⚠️ Database storage not available: {str(e)}")
+                    
+                except Exception as e:
+                    conversion_status.error(f"❌ Auto-conversion failed: {str(e)}")
+                    conversion_logger.error(f"Arrival conversion error: {e}")
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                        
+            except Exception as e:
+                st.error(f"Error uploading file: {str(e)}")
+        
+        # Load and display current data
+        arrivals_data = st.session_state.get('arrivals_data')
+        
+        # Try to load from existing CSV if no data in session
+        if arrivals_data is None:
+            try:
+                csv_path = "data/processed/arrival_check.csv"
+                if os.path.exists(csv_path):
+                    arrivals_data = pd.read_csv(csv_path)
+                    # Convert date columns
+                    date_cols = ['ARRIVAL', 'DEPARTURE']
+                    for col in date_cols:
+                        if col in arrivals_data.columns:
+                            arrivals_data[col] = pd.to_datetime(arrivals_data[col])
+                    st.session_state.arrivals_data = arrivals_data
+                    st.info(f"✅ Loaded existing arrival data: {len(arrivals_data)} records")
+            except Exception as e:
+                conversion_logger.error(f"Failed to load existing arrival data: {e}")
+        
+        if arrivals_data is not None and not arrivals_data.empty:
+            # Comprehensive Analysis Section
+            st.markdown("---")
+            st.markdown("## 📊 Comprehensive Arrival Analytics")
+            
+            # KPI Cards for Arrival Dates
+            st.markdown("### 📈 *Key Performance Indicators*")
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            total_arrivals = len(arrivals_data)
+            unique_companies = arrivals_data['COMPANY_NAME_CLEAN'].nunique()
+            total_amount = arrivals_data['AMOUNT'].sum()
+            total_deposit = arrivals_data['DEPOSIT_PAID_CLEAN'].sum()
+            avg_adr = arrivals_data['CALCULATED_ADR'].mean()
+            
+            with col1:
+                st.metric("Total Arrivals", f"{total_arrivals:,}")
+            with col2:
+                st.metric("Unique Companies", f"{unique_companies:,}")
+            with col3:
+                st.metric("Total Revenue", f"AED {total_amount:,.0f}")
+            with col4:
+                st.metric("Total Deposits", f"AED {total_deposit:,.0f}")
+            with col5:
+                st.metric("Average ADR", f"AED {avg_adr:.0f}")
+            
+            # 1. Highest Arrival Count by Company (Horizontal Bar Chart)
+            st.markdown("### 🏢 Highest Arrival Count by Company")
+            company_arrivals = arrivals_data.groupby('COMPANY_NAME_CLEAN')['ARRIVAL_COUNT'].sum().sort_values(ascending=True).tail(15)
+            
+            fig_company = px.bar(
+                x=company_arrivals.values,
+                y=company_arrivals.index,
+                orientation='h',
+                title="Top 15 Companies by Arrival Count",
+                labels={'x': 'Number of Arrivals', 'y': 'Company Name'},
+                color=company_arrivals.values,
+                color_continuous_scale='Blues'
+            )
+            fig_company.update_layout(height=500, showlegend=False)
+            st.plotly_chart(fig_company, use_container_width=True)
+            
+            # 2. Company Deposit Analysis with T-Company Flagging
+            st.markdown("### 💰 Company Deposit Analysis")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Deposit pivot table
+                deposit_pivot = arrivals_data.groupby('COMPANY_NAME_CLEAN').agg({
+                    'DEPOSIT_PAID_CLEAN': ['sum', 'count'],
+                    'COMPANY_FLAGGED': 'first',
+                    'AMOUNT': 'sum'
+                }).round(2)
+                deposit_pivot.columns = ['Total_Deposit', 'Booking_Count', 'Flagged', 'Total_Amount']
+                deposit_pivot = deposit_pivot.sort_values('Total_Deposit', ascending=False)
                 
-        except Exception as e:
-            st.error(f"Error in Arrivals analysis: {str(e)}")
+                # Flag T-companies
+                t_companies = deposit_pivot[deposit_pivot.index.str.startswith('T-', na=False)]
+                if not t_companies.empty:
+                    st.markdown("**🚩 T-Companies Flagged:**")
+                    st.dataframe(t_companies)
+                
+                st.markdown("**💸 All Companies - Deposit Summary:**")
+                st.dataframe(deposit_pivot.head(20))
+            
+            with col2:
+                # Deposit payment distribution
+                deposit_dist = arrivals_data.groupby(['COMPANY_NAME_CLEAN', 'HAS_DEPOSIT']).size().unstack(fill_value=0)
+                if 1 in deposit_dist.columns and 0 in deposit_dist.columns:
+                    deposit_dist.columns = ['No_Deposit', 'Has_Deposit']
+                    deposit_dist['Total'] = deposit_dist.sum(axis=1)
+                    deposit_dist = deposit_dist.sort_values('Total', ascending=False).head(10)
+                    
+                    fig_deposit = px.bar(
+                        deposit_dist,
+                        x=['No_Deposit', 'Has_Deposit'],
+                        title="Deposit Payment Status by Top Companies",
+                        labels={'value': 'Number of Bookings', 'variable': 'Deposit Status'}
+                    )
+                    st.plotly_chart(fig_deposit, use_container_width=True)
+            
+            # 3. Booking Lead Time Analysis (>10 days flagging)
+            st.markdown("### ⏰ Booking Lead Time Analysis")
+            if 'LONG_BOOKING_FLAG' in arrivals_data.columns:
+                long_bookings = arrivals_data['LONG_BOOKING_FLAG'].sum()
+                total_bookings = len(arrivals_data)
+                long_booking_pct = (long_bookings / total_bookings) * 100
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Long Bookings (>10 days)", f"{long_bookings:,}", f"{long_booking_pct:.1f}%")
+                with col2:
+                    st.metric("Regular Bookings (≤10 days)", f"{total_bookings - long_bookings:,}")
+            
+            # 4. Check-in/Check-out Trend Curve by Company Count
+            st.markdown("### 📅 Check-in/Check-out Trends by Company Count")
+            
+            # Daily arrival trends
+            if 'ARRIVAL' in arrivals_data.columns:
+                daily_arrivals = arrivals_data.groupby(arrivals_data['ARRIVAL'].dt.date).agg({
+                    'ARRIVAL_COUNT': 'sum',
+                    'COMPANY_NAME_CLEAN': 'nunique'
+                }).rename(columns={'COMPANY_NAME_CLEAN': 'Unique_Companies'})
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig_daily = px.line(
+                        x=daily_arrivals.index,
+                        y=daily_arrivals['ARRIVAL_COUNT'],
+                        title="Daily Arrival Count Trend",
+                        labels={'x': 'Date', 'y': 'Number of Arrivals'}
+                    )
+                    st.plotly_chart(fig_daily, use_container_width=True)
+                    
+                    # Show table
+                    st.markdown("**📊 Daily Arrivals Table:**")
+                    st.dataframe(daily_arrivals.tail(20))
+                
+                with col2:
+                    fig_companies = px.line(
+                        x=daily_arrivals.index,
+                        y=daily_arrivals['Unique_Companies'],
+                        title="Unique Companies per Day Trend",
+                        labels={'x': 'Date', 'y': 'Number of Unique Companies'}
+                    )
+                    st.plotly_chart(fig_companies, use_container_width=True)
+            
+            # 5. Length of Stay Distribution
+            st.markdown("### 🏨 Length of Stay Distribution")
+            if 'NIGHTS' in arrivals_data.columns:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Histogram
+                    fig_hist = px.histogram(
+                        arrivals_data,
+                        x='NIGHTS',
+                        nbins=20,
+                        title="Length of Stay Distribution (Histogram)",
+                        labels={'x': 'Number of Nights', 'y': 'Frequency'}
+                    )
+                    st.plotly_chart(fig_hist, use_container_width=True)
+                
+                with col2:
+                    # Box plot
+                    fig_box = px.box(
+                        arrivals_data,
+                        y='NIGHTS',
+                        title="Length of Stay Distribution (Box Plot)",
+                        labels={'y': 'Number of Nights'}
+                    )
+                    st.plotly_chart(fig_box, use_container_width=True)
+                
+                # Statistics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Avg Nights", f"{arrivals_data['NIGHTS'].mean():.1f}")
+                with col2:
+                    st.metric("Median Nights", f"{arrivals_data['NIGHTS'].median():.0f}")
+                with col3:
+                    st.metric("Min Nights", f"{arrivals_data['NIGHTS'].min():.0f}")
+                with col4:
+                    st.metric("Max Nights", f"{arrivals_data['NIGHTS'].max():.0f}")
+            
+            # 6. Additional Analysis
+            st.markdown("### 📊 Additional Insights")
+            
+            # Seasonal analysis
+            if 'SEASON' in arrivals_data.columns:
+                season_analysis = arrivals_data.groupby('SEASON').agg({
+                    'ARRIVAL_COUNT': 'sum',
+                    'AMOUNT': 'sum',
+                    'CALCULATED_ADR': 'mean'
+                }).round(2)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**🌤️ Seasonal Analysis:**")
+                    st.dataframe(season_analysis)
+                
+                with col2:
+                    fig_season = px.pie(
+                        values=season_analysis['ARRIVAL_COUNT'],
+                        names=season_analysis.index,
+                        title="Arrivals by Season"
+                    )
+                    st.plotly_chart(fig_season, use_container_width=True)
+        
+        else:
+            st.info("🚪 No arrival data available. Please upload an Arrival Report Excel file to begin analysis.")
+    
+    with arrivals_data_tab:
+        st.subheader("📋 Arrivals Data Table")
+        st.info("View and explore the converted arrival data in tabular format")
+        
+        # Load arrivals data
+        arrivals_data = st.session_state.get('arrivals_data')
+        
+        # Try to load from existing CSV if no data in session
+        if arrivals_data is None:
+            try:
+                csv_path = "data/processed/arrival_check.csv"
+                if os.path.exists(csv_path):
+                    arrivals_data = pd.read_csv(csv_path)
+                    # Convert date columns
+                    date_cols = ['ARRIVAL', 'DEPARTURE']
+                    for col in date_cols:
+                        if col in arrivals_data.columns:
+                            arrivals_data[col] = pd.to_datetime(arrivals_data[col])
+                    st.session_state.arrivals_data = arrivals_data
+            except Exception as e:
+                st.error(f"Failed to load arrival data: {e}")
+        
+        if arrivals_data is not None and not arrivals_data.empty:
+            # Data summary
+            st.markdown("### 📊 Data Summary")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Records", len(arrivals_data))
+            with col2:
+                st.metric("Total Columns", len(arrivals_data.columns))
+            with col3:
+                st.metric("Date Range", f"{arrivals_data['ARRIVAL'].min().strftime('%Y-%m-%d')} to {arrivals_data['ARRIVAL'].max().strftime('%Y-%m-%d')}")
+            with col4:
+                st.metric("Unique Companies", arrivals_data['COMPANY_NAME_CLEAN'].nunique())
+            
+            # Filters
+            st.markdown("### 🔍 Data Filters")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Company filter
+                companies = ['All'] + sorted(arrivals_data['COMPANY_NAME_CLEAN'].unique().tolist())
+                selected_company = st.selectbox("Filter by Company", companies)
+            
+            with col2:
+                # Date range filter
+                min_date = arrivals_data['ARRIVAL'].min().date()
+                max_date = arrivals_data['ARRIVAL'].max().date()
+                date_range = st.date_input(
+                    "Filter by Date Range",
+                    value=(min_date, max_date),
+                    min_value=min_date,
+                    max_value=max_date
+                )
+            
+            with col3:
+                # Deposit filter
+                deposit_filter = st.selectbox("Filter by Deposit Status", ['All', 'Has Deposit', 'No Deposit'])
+            
+            # Apply filters
+            filtered_data = arrivals_data.copy()
+            
+            if selected_company != 'All':
+                filtered_data = filtered_data[filtered_data['COMPANY_NAME_CLEAN'] == selected_company]
+            
+            if len(date_range) == 2:
+                start_date, end_date = date_range
+                filtered_data = filtered_data[
+                    (filtered_data['ARRIVAL'].dt.date >= start_date) & 
+                    (filtered_data['ARRIVAL'].dt.date <= end_date)
+                ]
+            
+            if deposit_filter == 'Has Deposit':
+                filtered_data = filtered_data[filtered_data['HAS_DEPOSIT'] == 1]
+            elif deposit_filter == 'No Deposit':
+                filtered_data = filtered_data[filtered_data['HAS_DEPOSIT'] == 0]
+            
+            # Show filtered results
+            st.markdown(f"### 📋 Filtered Data ({len(filtered_data)} records)")
+            
+            # Column selector
+            all_columns = filtered_data.columns.tolist()
+            key_columns = [
+                'COMPANY_NAME_CLEAN', 'ARRIVAL', 'DEPARTURE', 'NIGHTS', 
+                'PERSONS', 'AMOUNT', 'DEPOSIT_PAID_CLEAN', 'CALCULATED_ADR',
+                'RATE_CODE_CLEAN', 'SEASON', 'COMPANY_FLAGGED', 'LONG_BOOKING_FLAG'
+            ]
+            # Only include columns that exist in the data
+            default_columns = [col for col in key_columns if col in all_columns]
+            
+            selected_columns = st.multiselect(
+                "Select Columns to Display",
+                all_columns,
+                default=default_columns
+            )
+            
+            if selected_columns:
+                display_data = filtered_data[selected_columns]
+            else:
+                display_data = filtered_data
+            
+            # Display data with pagination
+            if len(display_data) > 0:
+                # Pagination
+                records_per_page = st.slider("Records per page", 10, 100, 25)
+                total_pages = (len(display_data) - 1) // records_per_page + 1
+                
+                if total_pages > 1:
+                    page = st.number_input(
+                        f"Page (1 to {total_pages})",
+                        min_value=1,
+                        max_value=total_pages,
+                        value=1
+                    )
+                    start_idx = (page - 1) * records_per_page
+                    end_idx = start_idx + records_per_page
+                    paginated_data = display_data.iloc[start_idx:end_idx]
+                else:
+                    paginated_data = display_data
+                
+                # Display table
+                st.dataframe(
+                    paginated_data,
+                    use_container_width=True,
+                    height=600
+                )
+                
+                # Download button
+                csv_buffer = io.StringIO()
+                filtered_data.to_csv(csv_buffer, index=False)
+                csv_data = csv_buffer.getvalue()
+                
+                st.download_button(
+                    label="📥 Download Filtered Data as CSV",
+                    data=csv_data,
+                    file_name=f"arrival_data_filtered_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+                
+                # Show summary statistics for filtered data
+                if len(filtered_data) > 0:
+                    st.markdown("### 📈 Filtered Data Statistics")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Total Amount", f"AED {filtered_data['AMOUNT'].sum():,.0f}")
+                    with col2:
+                        st.metric("Total Nights", f"{filtered_data['NIGHTS'].sum():,.0f}")
+                    with col3:
+                        st.metric("Avg ADR", f"AED {filtered_data['CALCULATED_ADR'].mean():.0f}")
+                    with col4:
+                        st.metric("Total Deposits", f"AED {filtered_data['DEPOSIT_PAID_CLEAN'].sum():,.0f}")
+            else:
+                st.warning("No data matches the selected filters.")
+        
+        else:
+            st.info("📋 No arrival data available. Please upload an Arrival Report in the 'Arrivals' tab first.")
 
 def historical_forecast_tab():
     """Historical & Forecast tab with sub-tabs for analysis and forecasting"""
