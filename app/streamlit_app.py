@@ -26,6 +26,38 @@ if sys.platform == "win32" and not hasattr(sys.stdout, '_wrapped'):
         # stdout/stderr might already be wrapped or unavailable
         pass
 import traceback
+import numpy as np
+from dateutil.relativedelta import relativedelta
+import warnings
+warnings.filterwarnings('ignore')
+
+# Time series forecasting imports
+try:
+    from statsmodels.tsa.arima.model import ARIMA
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+    from statsmodels.tsa.exponential_smoothing.ets import ETSModel
+    from statsmodels.tsa.seasonal import seasonal_decompose
+    from statsmodels.stats.diagnostic import acorr_ljungbox
+    from statsmodels.tsa.stattools import adfuller
+    TS_AVAILABLE = True
+except ImportError:
+    TS_AVAILABLE = False
+
+try:
+    import prophet
+    from prophet import Prophet
+    PROPHET_AVAILABLE = True
+except ImportError:
+    PROPHET_AVAILABLE = False
+
+try:
+    import xgboost as xgb
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import mean_absolute_error, mean_squared_error
+    from sklearn.preprocessing import StandardScaler
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
 
 # Add project root and converters to path
 project_root = Path(__file__).parent.parent
@@ -2604,7 +2636,7 @@ def events_analysis_tab():
             st.info("No block bookings found coinciding with major events.")
 
 def historical_forecast_tab():
-    """Historical & Forecast tab - historical data analysis and trends"""
+    """Historical & Forecast tab with sub-tabs for analysis and forecasting"""
     st.header("📊 Historical & Forecast Analysis")
     
     # Initialize historical data if not already loaded
@@ -2616,6 +2648,17 @@ def historical_forecast_tab():
         load_historical_data()
         st.session_state.historical_data_loaded = True
     
+    # Create sub-tabs
+    tab1, tab2 = st.tabs(["📊 Trend Analysis", "🔮 Time Series Forecast"])
+    
+    with tab1:
+        trend_analysis_subtab()
+    
+    with tab2:
+        time_series_forecast_subtab()
+
+def trend_analysis_subtab():
+    """Trend Analysis sub-tab - existing functionality"""
     # Display static KPIs at the top with smaller font
     display_historical_kpis()
     
@@ -2659,6 +2702,35 @@ def historical_forecast_tab():
     
     st.write("##### Monthly ADR Comparison")
     display_monthly_adr_comparison(selected_month)
+
+def time_series_forecast_subtab():
+    """Time Series Forecast sub-tab - advanced forecasting"""
+    st.subheader("🔮 Time Series Forecasting")
+    
+    # Display forecast preparation status
+    if prepare_forecast_data():
+        # Forecast horizon selection
+        st.write("**Forecast Horizons:**")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.info("📅 **Short-term (3 months)**\nOperational planning, rate decisions")
+        with col2:
+            st.info("📅 **Medium-term (6 months)**\nQuarterly budgeting, promotions")
+        with col3:
+            st.info("📅 **Long-term (12 months)**\nAnnual budgeting, strategic planning")
+        
+        st.divider()
+        
+        # Generate forecasts
+        if st.button("🚀 Generate Forecasts", use_container_width=True):
+            with st.spinner("Generating forecasts... This may take a few minutes."):
+                generate_all_forecasts()
+        
+        # Display existing forecasts if available
+        display_forecast_results()
+    else:
+        st.error("❌ Unable to prepare forecast data. Please ensure historical data is properly loaded.")
 
 def load_historical_data():
     """Load historical data files into SQLite database"""
@@ -3137,6 +3209,496 @@ def display_monthly_adr_comparison(selected_month):
         
     except Exception as e:
         st.error(f"Error displaying monthly ADR comparison: {str(e)}")
+
+def prepare_forecast_data():
+    """Prepare and combine all historical data for forecasting"""
+    try:
+        db = get_database()
+        
+        # Combine all historical data
+        all_data = []
+        
+        # Historical data (2022-2024)
+        for year in [2022, 2023, 2024]:
+            historical_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+            if not historical_data.empty:
+                historical_data['Date'] = pd.to_datetime(historical_data['Date'])
+                all_data.append(historical_data[['Date', 'Rm Sold', 'Revenue', 'ADR', 'RevPar']])
+        
+        # Current year data (2025)
+        current_data = db.get_occupancy_data()
+        if not current_data.empty:
+            current_data['Date'] = pd.to_datetime(current_data['Date'])
+            current_2025 = current_data[current_data['Date'].dt.year == 2025]
+            if not current_2025.empty:
+                # Rename column to match historical data
+                current_2025 = current_2025.rename(columns={'Rm_Sold': 'Rm Sold'})
+                all_data.append(current_2025[['Date', 'Rm Sold', 'Revenue', 'ADR', 'RevPar']])
+        
+        if not all_data:
+            return False
+        
+        # Combine all data
+        combined_data = pd.concat(all_data, ignore_index=True)
+        combined_data = combined_data.sort_values('Date').reset_index(drop=True)
+        
+        # Fill missing dates
+        date_range = pd.date_range(start=combined_data['Date'].min(), 
+                                 end=combined_data['Date'].max(), 
+                                 freq='D')
+        full_df = pd.DataFrame({'Date': date_range})
+        combined_data = full_df.merge(combined_data, on='Date', how='left')
+        
+        # Forward fill missing values
+        for col in ['Rm Sold', 'Revenue', 'ADR', 'RevPar']:
+            combined_data[col] = combined_data[col].fillna(method='ffill')
+        
+        # Calculate occupancy percentage
+        combined_data['Occupancy_Pct'] = (combined_data['Rm Sold'] / 339) * 100
+        
+        # Store in session state
+        st.session_state.forecast_data = combined_data
+        return True
+        
+    except Exception as e:
+        st.error(f"Error preparing forecast data: {str(e)}")
+        return False
+
+def generate_all_forecasts():
+    """Generate forecasts for all horizons using appropriate models"""
+    try:
+        if 'forecast_data' not in st.session_state:
+            st.error("Forecast data not prepared")
+            return
+        
+        data = st.session_state.forecast_data.copy()
+        
+        # Prepare data for forecasting
+        data.set_index('Date', inplace=True)
+        
+        # Get current date
+        current_date = datetime.now()
+        
+        # Generate forecasts for each horizon
+        forecasts = {}
+        
+        # 3-month forecast (SARIMA/Prophet)
+        forecasts['3_month'] = generate_short_term_forecast(data, current_date, 90)
+        
+        # 6-month forecast (XGBoost/ML)
+        forecasts['6_month'] = generate_medium_term_forecast(data, current_date, 180)
+        
+        # 12-month forecast (Ensemble/TBATS)
+        forecasts['12_month'] = generate_long_term_forecast(data, current_date, 365)
+        
+        # Store forecasts
+        st.session_state.forecasts = forecasts
+        
+        st.success("✅ All forecasts generated successfully!")
+        
+    except Exception as e:
+        st.error(f"Error generating forecasts: {str(e)}")
+
+def generate_short_term_forecast(data, current_date, days):
+    """Generate 3-month forecast using SARIMA or Prophet"""
+    try:
+        # Use Revenue for forecasting
+        revenue_series = data['Revenue'].dropna()
+        
+        if PROPHET_AVAILABLE:
+            # Use Prophet for short-term forecasting
+            df_prophet = pd.DataFrame({
+                'ds': revenue_series.index,
+                'y': revenue_series.values
+            })
+            
+            model = Prophet(
+                yearly_seasonality=True,
+                weekly_seasonality=True,
+                daily_seasonality=False,
+                changepoint_prior_scale=0.05
+            )
+            
+            model.fit(df_prophet)
+            
+            # Create future dates
+            future = model.make_future_dataframe(periods=days)
+            forecast = model.predict(future)
+            
+            # Extract forecast for the requested period
+            forecast_period = forecast.tail(days)
+            
+            return {
+                'model': 'Prophet',
+                'forecast': forecast_period['yhat'].values,
+                'lower': forecast_period['yhat_lower'].values,
+                'upper': forecast_period['yhat_upper'].values,
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': forecast_period['yhat'].sum(),
+                'avg_adr': data['ADR'].tail(30).mean(),  # Use recent average
+                'avg_occupancy': data['Occupancy_Pct'].tail(30).mean()
+            }
+        
+        elif TS_AVAILABLE:
+            # Use SARIMA as fallback
+            model = SARIMAX(revenue_series, order=(1,1,1), seasonal_order=(1,1,1,12))
+            fitted_model = model.fit(disp=False)
+            
+            forecast = fitted_model.forecast(steps=days)
+            conf_int = fitted_model.get_forecast(steps=days).conf_int()
+            
+            return {
+                'model': 'SARIMA',
+                'forecast': forecast.values,
+                'lower': conf_int.iloc[:, 0].values,
+                'upper': conf_int.iloc[:, 1].values,
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': forecast.sum(),
+                'avg_adr': data['ADR'].tail(30).mean(),
+                'avg_occupancy': data['Occupancy_Pct'].tail(30).mean()
+            }
+        
+        else:
+            # Simple seasonal naive forecast
+            seasonal_avg = revenue_series.tail(365).mean()
+            forecast_values = [seasonal_avg] * days
+            
+            return {
+                'model': 'Seasonal Naive',
+                'forecast': forecast_values,
+                'lower': [v * 0.8 for v in forecast_values],
+                'upper': [v * 1.2 for v in forecast_values],
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': sum(forecast_values),
+                'avg_adr': data['ADR'].tail(30).mean(),
+                'avg_occupancy': data['Occupancy_Pct'].tail(30).mean()
+            }
+            
+    except Exception as e:
+        st.error(f"Error in short-term forecast: {str(e)}")
+        return None
+
+def generate_medium_term_forecast(data, current_date, days):
+    """Generate 6-month forecast using ML models"""
+    try:
+        if ML_AVAILABLE:
+            # Prepare features for ML model
+            df = data.copy()
+            
+            # Create lag features
+            for lag in [1, 7, 14, 30]:
+                df[f'Revenue_lag_{lag}'] = df['Revenue'].shift(lag)
+                df[f'Occupancy_lag_{lag}'] = df['Occupancy_Pct'].shift(lag)
+            
+            # Create rolling statistics
+            df['Revenue_roll_7'] = df['Revenue'].rolling(7).mean()
+            df['Revenue_roll_30'] = df['Revenue'].rolling(30).mean()
+            
+            # Add calendar features
+            df['dayofweek'] = df.index.dayofweek
+            df['month'] = df.index.month
+            df['quarter'] = df.index.quarter
+            
+            # Drop NaN values
+            df_clean = df.dropna()
+            
+            if len(df_clean) < 100:  # Need sufficient data
+                return generate_short_term_forecast(data, current_date, days)
+            
+            # Prepare features and target
+            feature_cols = [col for col in df_clean.columns if col != 'Revenue' and 'lag' in col or 'roll' in col or col in ['dayofweek', 'month', 'quarter']]
+            X = df_clean[feature_cols]
+            y = df_clean['Revenue']
+            
+            # Train XGBoost model
+            model = xgb.XGBRegressor(n_estimators=100, random_state=42)
+            model.fit(X, y)
+            
+            # Generate future features
+            future_features = []
+            last_data = df.tail(1).copy()
+            
+            for i in range(days):
+                future_date = current_date + timedelta(days=i)
+                
+                # Create future feature row
+                future_row = last_data.copy()
+                future_row.index = [future_date]
+                future_row['dayofweek'] = future_date.dayofweek
+                future_row['month'] = future_date.month
+                future_row['quarter'] = (future_date.month - 1) // 3 + 1
+                
+                future_features.append(future_row[feature_cols])
+            
+            future_X = pd.concat(future_features)
+            predictions = model.predict(future_X)
+            
+            return {
+                'model': 'XGBoost',
+                'forecast': predictions,
+                'lower': predictions * 0.85,
+                'upper': predictions * 1.15,
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': predictions.sum(),
+                'avg_adr': data['ADR'].tail(30).mean(),
+                'avg_occupancy': data['Occupancy_Pct'].tail(30).mean()
+            }
+        
+        else:
+            # Fallback to short-term method
+            return generate_short_term_forecast(data, current_date, days)
+            
+    except Exception as e:
+        st.error(f"Error in medium-term forecast: {str(e)}")
+        return generate_short_term_forecast(data, current_date, days)
+
+def generate_long_term_forecast(data, current_date, days):
+    """Generate 12-month forecast using ensemble methods"""
+    try:
+        # For long-term, use simpler but more robust approaches
+        revenue_series = data['Revenue'].dropna()
+        
+        # Seasonal decomposition
+        if len(revenue_series) >= 365*2:  # Need at least 2 years
+            decomposition = seasonal_decompose(revenue_series, model='additive', period=365)
+            trend = decomposition.trend.dropna()
+            seasonal = decomposition.seasonal.dropna()
+            
+            # Project trend
+            trend_slope = (trend.tail(30).mean() - trend.head(30).mean()) / len(trend)
+            
+            # Generate forecast
+            forecast_values = []
+            for i in range(days):
+                future_date = current_date + timedelta(days=i)
+                day_of_year = future_date.timetuple().tm_yday
+                
+                # Get seasonal component (cycle through year)
+                seasonal_idx = (day_of_year - 1) % len(seasonal)
+                seasonal_component = seasonal.iloc[seasonal_idx]
+                
+                # Project trend
+                trend_component = trend.iloc[-1] + (trend_slope * (i + 1))
+                
+                forecast_value = trend_component + seasonal_component
+                forecast_values.append(max(0, forecast_value))  # Ensure non-negative
+            
+            return {
+                'model': 'Seasonal Decomposition',
+                'forecast': forecast_values,
+                'lower': [v * 0.75 for v in forecast_values],
+                'upper': [v * 1.25 for v in forecast_values],
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': sum(forecast_values),
+                'avg_adr': data['ADR'].tail(90).mean(),
+                'avg_occupancy': data['Occupancy_Pct'].tail(90).mean()
+            }
+        
+        else:
+            # Simple trend projection
+            recent_avg = revenue_series.tail(90).mean()
+            yearly_growth = 0.05  # Assume 5% growth
+            
+            forecast_values = []
+            for i in range(days):
+                growth_factor = (1 + yearly_growth) ** (i / 365)
+                forecast_value = recent_avg * growth_factor
+                forecast_values.append(forecast_value)
+            
+            return {
+                'model': 'Trend Projection',
+                'forecast': forecast_values,
+                'lower': [v * 0.7 for v in forecast_values],
+                'upper': [v * 1.3 for v in forecast_values],
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': sum(forecast_values),
+                'avg_adr': data['ADR'].tail(90).mean(),
+                'avg_occupancy': data['Occupancy_Pct'].tail(90).mean()
+            }
+            
+    except Exception as e:
+        st.error(f"Error in long-term forecast: {str(e)}")
+        return generate_short_term_forecast(data, current_date, days)
+
+def display_forecast_results():
+    """Display forecast results in KPI cards and charts"""
+    if 'forecasts' not in st.session_state:
+        st.info("No forecasts available. Click 'Generate Forecasts' to create predictions.")
+        return
+    
+    forecasts = st.session_state.forecasts
+    
+    # Display KPI cards
+    st.subheader("🎯 Forecast KPIs")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # 3-month KPI
+    if forecasts.get('3_month'):
+        forecast_3m = forecasts['3_month']
+        with col1:
+            st.metric(
+                label="📅 3-Month Revenue Forecast",
+                value=f"AED {forecast_3m['revenue_total']:,.0f}",
+                delta=f"Model: {forecast_3m['model']}"
+            )
+            st.metric(
+                label="Average ADR",
+                value=f"AED {forecast_3m['avg_adr']:.0f}"
+            )
+            st.metric(
+                label="Average Occupancy",
+                value=f"{forecast_3m['avg_occupancy']:.1f}%"
+            )
+    
+    # 6-month KPI
+    if forecasts.get('6_month'):
+        forecast_6m = forecasts['6_month']
+        with col2:
+            st.metric(
+                label="📅 6-Month Revenue Forecast",
+                value=f"AED {forecast_6m['revenue_total']:,.0f}",
+                delta=f"Model: {forecast_6m['model']}"
+            )
+            st.metric(
+                label="Average ADR",
+                value=f"AED {forecast_6m['avg_adr']:.0f}"
+            )
+            st.metric(
+                label="Average Occupancy",
+                value=f"{forecast_6m['avg_occupancy']:.1f}%"
+            )
+    
+    # 12-month KPI
+    if forecasts.get('12_month'):
+        forecast_12m = forecasts['12_month']
+        with col3:
+            st.metric(
+                label="📅 12-Month Revenue Forecast",
+                value=f"AED {forecast_12m['revenue_total']:,.0f}",
+                delta=f"Model: {forecast_12m['model']}"
+            )
+            st.metric(
+                label="Average ADR",
+                value=f"AED {forecast_12m['avg_adr']:.0f}"
+            )
+            st.metric(
+                label="Average Occupancy",
+                value=f"{forecast_12m['avg_occupancy']:.1f}%"
+            )
+    
+    st.divider()
+    
+    # Display forecast charts
+    st.subheader("📈 Forecast Visualization")
+    
+    display_forecast_charts(forecasts)
+
+def display_forecast_charts(forecasts):
+    """Display interactive forecast charts"""
+    try:
+        fig = go.Figure()
+        
+        # Historical data
+        if 'forecast_data' in st.session_state:
+            historical = st.session_state.forecast_data.copy()
+            historical['Date'] = pd.to_datetime(historical['Date'])
+            historical = historical.set_index('Date')
+            
+            # Show last 2 years of historical data
+            cutoff_date = datetime.now() - timedelta(days=730)
+            recent_historical = historical[historical.index >= cutoff_date]
+            
+            fig.add_trace(go.Scatter(
+                x=recent_historical.index,
+                y=recent_historical['Revenue'],
+                mode='lines',
+                name='Historical Revenue',
+                line=dict(color='blue', width=2)
+            ))
+        
+        # Add forecast lines
+        colors = ['orange', 'green', 'purple']
+        names = ['3-Month', '6-Month', '12-Month']
+        
+        for i, (key, color, name) in enumerate(zip(['3_month', '6_month', '12_month'], colors, names)):
+            if forecasts.get(key):
+                forecast = forecasts[key]
+                
+                # Main forecast line
+                fig.add_trace(go.Scatter(
+                    x=forecast['dates'],
+                    y=forecast['forecast'],
+                    mode='lines',
+                    name=f'{name} Forecast',
+                    line=dict(color=color, width=2, dash='dash')
+                ))
+                
+                # Confidence intervals
+                fig.add_trace(go.Scatter(
+                    x=list(forecast['dates']) + list(forecast['dates'][::-1]),
+                    y=list(forecast['upper']) + list(forecast['lower'][::-1]),
+                    fill='tonexty' if i == 0 else 'toself',
+                    fillcolor=f'rgba({color}, 0.1)',
+                    line=dict(color='rgba(255,255,255,0)'),
+                    name=f'{name} Confidence Interval',
+                    showlegend=False
+                ))
+        
+        fig.update_layout(
+            title="Revenue Forecasts with Confidence Intervals",
+            xaxis_title="Date",
+            yaxis_title="Revenue (AED)",
+            hovermode='x unified',
+            height=600,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Model information
+        st.subheader("🔍 Model Information")
+        
+        info_col1, info_col2, info_col3 = st.columns(3)
+        
+        with info_col1:
+            if forecasts.get('3_month'):
+                st.info(f"""
+                **3-Month Forecast**
+                - Model: {forecasts['3_month']['model']}
+                - Best for: Operational planning
+                - Accuracy: High
+                - Use case: Rate decisions, staffing
+                """)
+        
+        with info_col2:
+            if forecasts.get('6_month'):
+                st.info(f"""
+                **6-Month Forecast**
+                - Model: {forecasts['6_month']['model']}
+                - Best for: Tactical planning
+                - Accuracy: Medium
+                - Use case: Promotions, budgeting
+                """)
+        
+        with info_col3:
+            if forecasts.get('12_month'):
+                st.info(f"""
+                **12-Month Forecast**
+                - Model: {forecasts['12_month']['model']}
+                - Best for: Strategic planning
+                - Accuracy: Lower (wider intervals)
+                - Use case: Annual budgets, capital planning
+                """)
+        
+    except Exception as e:
+        st.error(f"Error displaying forecast charts: {str(e)}")
 
 def main():
     """Main application function"""
