@@ -98,6 +98,12 @@ try:
 except ImportError:
     PROPHET_AVAILABLE = False
 
+try:
+    from app.gemini_backend import create_gemini_backend
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
 import sqlite3
 
 # Add project root and converters to path
@@ -5222,6 +5228,159 @@ def controls_logs_tab():
         except:
             st.info("📊 DB: Not available")
 
+def gpt_tab():
+    """GPT AI Assistant Tab for Natural Language SQL Queries"""
+    
+    st.title("🤖 GPT AI Assistant")
+    st.markdown("Ask questions about your revenue data in natural language and get SQL-powered answers.")
+    
+    # Check if Gemini is available
+    if not GEMINI_AVAILABLE:
+        st.error("⚠️ Gemini AI backend is not available. Please install google-generativeai package.")
+        st.code("pip install google-generativeai", language="bash")
+        return
+    
+    # API Key configuration
+    api_key = "AIzaSyBqgrOIUjZTEJxd7o1JUxVzMoknYrzQs08"  # Your provided API key
+    
+    # Initialize session state for chat history
+    if 'gpt_messages' not in st.session_state:
+        st.session_state.gpt_messages = []
+    
+    if 'gemini_backend' not in st.session_state:
+        try:
+            st.session_state.gemini_backend = create_gemini_backend(api_key)
+            if not st.session_state.gemini_backend.connected:
+                st.error(f"Failed to connect to Gemini AI: {st.session_state.gemini_backend.error_message}")
+                return
+        except Exception as e:
+            st.error(f"Error initializing Gemini backend: {str(e)}")
+            return
+    
+    # Create two columns for layout
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("💬 Ask Your Question")
+        
+        # Question input
+        question = st.text_area(
+            "Type your question about arrivals, revenue, occupancy, or any other data:",
+            height=100,
+            placeholder="Example: What was the total revenue for the last 30 days?\nExample: Show me the top 5 segments by occupancy this month\nExample: What is the average ADR for weekends vs weekdays?"
+        )
+        
+        # Ask button
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 4])
+        
+        with col_btn1:
+            ask_button = st.button("🚀 Ask", type="primary", use_container_width=True)
+        
+        with col_btn2:
+            clear_button = st.button("🗑️ Clear", use_container_width=True)
+    
+    with col2:
+        st.subheader("ℹ️ Tips")
+        st.markdown("""
+        **Example Questions:**
+        - "What was the total revenue last month?"
+        - "Show top 5 segments by occupancy"
+        - "Average ADR for weekends"
+        - "Revenue trends over last 6 months"
+        - "Occupancy rate by room type"
+        """)
+    
+    # Clear chat history
+    if clear_button:
+        st.session_state.gpt_messages = []
+        st.rerun()
+    
+    # Process question
+    if ask_button:
+        if not question or question.strip() == "":
+            st.warning("⚠️ Please enter a question before clicking Ask.")
+        else:
+            # Add user message to chat
+            st.session_state.gpt_messages.append({
+                "role": "user",
+                "content": question,
+                "timestamp": datetime.now()
+            })
+            
+            # Show loading spinner
+            with st.spinner("🤖 AI is thinking and generating SQL query..."):
+                try:
+                    # Process the question
+                    result = st.session_state.gemini_backend.process_question(question)
+                    
+                    # Add AI response to chat
+                    st.session_state.gpt_messages.append({
+                        "role": "assistant",
+                        "content": result,
+                        "timestamp": datetime.now()
+                    })
+                    
+                except Exception as e:
+                    error_msg = f"Error processing question: {str(e)}"
+                    st.session_state.gpt_messages.append({
+                        "role": "assistant",
+                        "content": {"success": False, "error_message": error_msg},
+                        "timestamp": datetime.now()
+                    })
+            
+            st.rerun()
+    
+    # Display chat history
+    if st.session_state.gpt_messages:
+        st.markdown("---")
+        st.subheader("💬 Conversation History")
+        
+        # Reverse the messages to show newest first
+        for i, message in enumerate(reversed(st.session_state.gpt_messages)):
+            with st.container():
+                if message["role"] == "user":
+                    st.markdown(f"**👤 You asked:** {message['content']}")
+                    st.caption(f"⏰ {message['timestamp'].strftime('%H:%M:%S')}")
+                
+                else:  # assistant
+                    result = message["content"]
+                    
+                    if result.get("success", False):
+                        st.markdown("**🤖 AI Response:**")
+                        
+                        # Show SQL query
+                        st.markdown("**📝 Generated SQL Query:**")
+                        st.code(result["sql_query"], language="sql")
+                        
+                        # Show results
+                        if len(result["results"]) > 0:
+                            st.markdown(f"**📊 Results ({result['row_count']} rows):**")
+                            
+                            # Display as dataframe with better formatting
+                            st.dataframe(
+                                result["results"],
+                                use_container_width=True,
+                                height=min(400, (len(result["results"]) + 1) * 35)
+                            )
+                            
+                            # Show summary if many rows
+                            if result["row_count"] > 10:
+                                st.info(f"📈 Showing all {result['row_count']} rows")
+                        else:
+                            st.info("📭 Query executed successfully but returned no results.")
+                    
+                    else:
+                        st.error(f"❌ **Error:** {result.get('error_message', 'Unknown error')}")
+                    
+                    st.caption(f"⏰ {message['timestamp'].strftime('%H:%M:%S')}")
+                
+                st.markdown("---")
+    
+    else:
+        # Show welcome message when no chat history
+        st.markdown("---")
+        st.info("👋 Welcome! Ask any question about your revenue data above to get started.")
+
 def main():
     """Main application with simple sidebar"""
     
@@ -5285,6 +5444,7 @@ def main():
             "Historical & Forecast",
             "Enhanced Forecasting",
             "Machine Learning",
+            "GPT",
             "Insights Analysis",
             "Controls & Logs"
         ]
@@ -5355,6 +5515,8 @@ def main():
         enhanced_forecasting_tab()
     elif current_tab == "Machine Learning":
         machine_learning_tab()
+    elif current_tab == "GPT":
+        gpt_tab()
     elif current_tab == "Insights Analysis":
         insights_analysis_tab()
     elif current_tab == "Controls & Logs":
