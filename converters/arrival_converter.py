@@ -81,6 +81,12 @@ def process_arrival_report(file_path, output_csv_path=None):
         df = pd.read_excel(file_path, sheet_name='ARRIVAL CHECK')
         logger.info(f"Loaded {len(df)} records from ARRIVAL CHECK sheet")
         
+        # Remove rows with no confirmation number in column A (HCN)
+        initial_count = len(df)
+        df = df.dropna(subset=[df.columns[0]])  # Column A should have confirmation numbers
+        removed_count = initial_count - len(df)
+        logger.info(f"Removed {removed_count} rows without confirmation numbers. {len(df)} records remaining.")
+        
         # Convert date columns
         df['ARRIVAL'] = pd.to_datetime(df['ARRIVAL'], errors='coerce')
         df['DEPARTURE'] = pd.to_datetime(df['DEPARTURE'], errors='coerce')

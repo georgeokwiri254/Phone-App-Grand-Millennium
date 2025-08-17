@@ -3160,35 +3160,49 @@ def entered_on_arrivals_tab():
             # 4. Check-in/Check-out Trend Curve by Company Count
             st.markdown("### 📅 Check-in/Check-out Trends by Company Count")
             
+            col1, col2 = st.columns(2)
+            
             # Daily arrival trends
             if 'ARRIVAL' in arrivals_data.columns:
                 daily_arrivals = arrivals_data.groupby(arrivals_data['ARRIVAL'].dt.date).agg({
                     'ARRIVAL_COUNT': 'sum',
                     'COMPANY_NAME_CLEAN': 'nunique'
-                }).rename(columns={'COMPANY_NAME_CLEAN': 'Unique_Companies'})
+                }).rename(columns={'COMPANY_NAME_CLEAN': 'Unique_Companies_Arrival'})
                 
-                col1, col2 = st.columns(2)
                 with col1:
-                    fig_daily = px.line(
+                    fig_arrival = px.line(
                         x=daily_arrivals.index,
                         y=daily_arrivals['ARRIVAL_COUNT'],
-                        title="Daily Arrival Count Trend",
-                        labels={'x': 'Date', 'y': 'Number of Arrivals'}
+                        title="Daily Check-in Count Trend",
+                        labels={'x': 'Date', 'y': 'Number of Check-ins'},
+                        color_discrete_sequence=['#1f77b4']
                     )
-                    st.plotly_chart(fig_daily, use_container_width=True)
+                    st.plotly_chart(fig_arrival, use_container_width=True)
                     
                     # Show table
-                    st.markdown("**📊 Daily Arrivals Table:**")
-                    st.dataframe(daily_arrivals.tail(20))
+                    st.markdown("**📊 Daily Check-ins Table:**")
+                    st.dataframe(daily_arrivals.tail(10))
+            
+            # Daily departure trends
+            if 'DEPARTURE' in arrivals_data.columns:
+                daily_departures = arrivals_data.groupby(arrivals_data['DEPARTURE'].dt.date).agg({
+                    'ARRIVAL_COUNT': 'sum',
+                    'COMPANY_NAME_CLEAN': 'nunique'
+                }).rename(columns={'ARRIVAL_COUNT': 'DEPARTURE_COUNT', 'COMPANY_NAME_CLEAN': 'Unique_Companies_Departure'})
                 
                 with col2:
-                    fig_companies = px.line(
-                        x=daily_arrivals.index,
-                        y=daily_arrivals['Unique_Companies'],
-                        title="Unique Companies per Day Trend",
-                        labels={'x': 'Date', 'y': 'Number of Unique Companies'}
+                    fig_departure = px.line(
+                        x=daily_departures.index,
+                        y=daily_departures['DEPARTURE_COUNT'],
+                        title="Daily Check-out Count Trend",
+                        labels={'x': 'Date', 'y': 'Number of Check-outs'},
+                        color_discrete_sequence=['#ff7f0e']
                     )
-                    st.plotly_chart(fig_companies, use_container_width=True)
+                    st.plotly_chart(fig_departure, use_container_width=True)
+                    
+                    # Show table
+                    st.markdown("**📊 Daily Check-outs Table:**")
+                    st.dataframe(daily_departures.tail(10))
             
             # 5. Length of Stay Distribution
             st.markdown("### 🏨 Length of Stay Distribution")
@@ -3230,26 +3244,16 @@ def entered_on_arrivals_tab():
             # 6. Additional Analysis
             st.markdown("### 📊 Additional Insights")
             
-            # Seasonal analysis
-            if 'SEASON' in arrivals_data.columns:
-                season_analysis = arrivals_data.groupby('SEASON').agg({
+            # Room type analysis
+            if 'ROOM_CATEGORY_LABEL' in arrivals_data.columns:
+                room_analysis = arrivals_data.groupby('ROOM_CATEGORY_LABEL').agg({
                     'ARRIVAL_COUNT': 'sum',
                     'AMOUNT': 'sum',
                     'CALCULATED_ADR': 'mean'
                 }).round(2)
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**🌤️ Seasonal Analysis:**")
-                    st.dataframe(season_analysis)
-                
-                with col2:
-                    fig_season = px.pie(
-                        values=season_analysis['ARRIVAL_COUNT'],
-                        names=season_analysis.index,
-                        title="Arrivals by Season"
-                    )
-                    st.plotly_chart(fig_season, use_container_width=True)
+                st.markdown("**🏨 Room Category Analysis:**")
+                st.dataframe(room_analysis.sort_values('ARRIVAL_COUNT', ascending=False))
         
         else:
             st.info("🚪 No arrival data available. Please upload an Arrival Report Excel file to begin analysis.")
