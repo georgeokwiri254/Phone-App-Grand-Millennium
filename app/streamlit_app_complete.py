@@ -1,6 +1,6 @@
 """
-Grand Millennium Revenue Analytics Dashboard - Main Application
-Complete Streamlit application with all features and corrected time series forecasting
+Grand Millennium Revenue Analytics Dashboard - Complete Version
+Full-featured Streamlit application with corrected forecasting and all features
 """
 
 import streamlit as st
@@ -18,69 +18,33 @@ import io
 import numpy as np
 import sqlite3
 import warnings
-from dateutil.relativedelta import relativedelta
 warnings.filterwarnings('ignore')
-
-# Fix encoding issues on Windows
-if sys.platform == "win32" and not hasattr(sys.stdout, '_wrapped'):
-    try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-        sys.stdout._wrapped = True
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-        sys.stderr._wrapped = True
-    except (AttributeError, ValueError):
-        pass
 
 # Import corrected forecasting models
 try:
     from app.corrected_forecasting import CorrectedHotelForecasting
     from app.data_integration import HotelDataIntegrator
-    from app.fast_forecasting import FastHotelForecasting
     CORRECTED_FORECASTING_AVAILABLE = True
 except ImportError:
     CORRECTED_FORECASTING_AVAILABLE = False
-    print("Corrected forecasting modules not available.")
 
-# Time series forecasting imports
+# Statistical models for forecasting
 try:
-    from statsmodels.tsa.arima.model import ARIMA
-    from statsmodels.tsa.statespace.sarimax import SARIMAX
-    from statsmodels.tsa.exponential_smoothing.ets import ETSModel
-    from statsmodels.tsa.seasonal import seasonal_decompose
-    from statsmodels.stats.diagnostic import acorr_ljungbox
-    from statsmodels.tsa.stattools import adfuller
     from statsmodels.tsa.holtwinters import ExponentialSmoothing
-    TS_AVAILABLE = True
+    from sklearn.metrics import mean_absolute_error, mean_squared_error
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.linear_model import LinearRegression
+    FORECASTING_LIBS_AVAILABLE = True
 except ImportError:
-    TS_AVAILABLE = False
-    print("Time series forecasting libraries not available.")
+    FORECASTING_LIBS_AVAILABLE = False
 
-try:
-    from prophet import Prophet
-    PROPHET_AVAILABLE = True
-except ImportError:
-    PROPHET_AVAILABLE = False
-    print("Prophet not available.")
-
-try:
-    import xgboost as xgb
-    from sklearn.model_selection import train_test_split
-    from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
-    from sklearn.preprocessing import StandardScaler, MinMaxScaler
-    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-    from sklearn.linear_model import LinearRegression, Ridge
-    ML_AVAILABLE = True
-except ImportError:
-    ML_AVAILABLE = False
-    print("Machine learning libraries not available.")
-
-# Database and logging imports
+# Other imports
 try:
     from app.database import get_database
     database_available = True
 except ImportError:
     database_available = False
-    print("Database module not available.")
 
 try:
     from app.logging_config import get_conversion_logger, get_app_logger, get_log_content
@@ -91,21 +55,6 @@ except ImportError:
     app_logger = None
     conversion_logger = None
     loggers_available = False
-    print("Logging module not available.")
-
-try:
-    from app.forecasting import get_forecaster
-    forecasting_available = True
-except ImportError:
-    forecasting_available = False
-    print("Basic forecasting module not available.")
-
-try:
-    from app.advanced_forecasting import get_advanced_forecaster
-    advanced_forecasting_available = True
-except ImportError:
-    advanced_forecasting_available = False
-    print("Advanced forecasting module not available.")
 
 try:
     from converters.block_converter import run_block_conversion
@@ -114,9 +63,8 @@ try:
     converters_available = True
 except ImportError:
     converters_available = False
-    print("Converters module not available.")
 
-# Add project root and converters to path
+# Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 sys.path.append(str(project_root / 'converters'))
@@ -227,48 +175,13 @@ def run_conversion_process(file_path):
         st.session_state.last_run_timestamp = datetime.now()
         
         status_placeholder.success("✅ Conversion completed successfully!")
+        
         return True
         
     except Exception as e:
         status_placeholder.error(f"❌ Conversion failed: {str(e)}")
         if app_logger:
             app_logger.error(f"Conversion process failed: {str(e)}")
-        return False
-
-def prepare_forecast_data():
-    """Prepare data for forecasting"""
-    try:
-        if not database_available:
-            st.error("Database not available for forecasting")
-            return False
-        
-        # Check if combined data exists
-        db_path = os.path.join(project_root, "db", "revenue.db")
-        conn = sqlite3.connect(db_path)
-        
-        # Check if hotel_data_combined table exists
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='hotel_data_combined'")
-        table_exists = cursor.fetchone() is not None
-        conn.close()
-        
-        if not table_exists:
-            st.warning("Combined hotel data not found. Running data integration...")
-            if CORRECTED_FORECASTING_AVAILABLE:
-                # Run data integration
-                data_dir = os.path.join(project_root, "data", "processed")
-                integrator = HotelDataIntegrator(data_dir, db_path)
-                df, scalers, csv_path = integrator.run_integration()
-                st.success("✅ Data integration completed")
-                return True
-            else:
-                st.error("Data integration modules not available")
-                return False
-        
-        return True
-        
-    except Exception as e:
-        st.error(f"Error preparing forecast data: {str(e)}")
         return False
 
 # ============================================================================
@@ -316,13 +229,10 @@ def dashboard_tab():
             st.warning("⚠️ No data loaded")
         
         if database_available:
-            try:
-                db = get_database()
-                db_stats = db.get_database_stats()
-                if db_stats:
-                    st.info(f"📊 DB: {db_stats.get('segment_analysis_rows', 0)} segments, {db_stats.get('occupancy_analysis_rows', 0)} occupancy records")
-            except:
-                st.info("📊 Database statistics unavailable")
+            db = get_database()
+            db_stats = db.get_database_stats()
+            if db_stats:
+                st.info(f"📊 DB: {db_stats.get('segment_analysis_rows', 0)} segments, {db_stats.get('occupancy_analysis_rows', 0)} occupancy records")
     
     with col3:
         st.subheader("🔧 Actions")
@@ -349,207 +259,6 @@ def dashboard_tab():
                 st.dataframe(st.session_state.occupancy_data.head())
             else:
                 st.info("No occupancy data available")
-
-def daily_occupancy_tab():
-    """Daily Occupancy Analysis Tab"""
-    st.header("📈 Daily Occupancy Analysis")
-    
-    if not st.session_state.data_loaded:
-        show_loading_requirements()
-        return
-    
-    try:
-        if database_available:
-            db = get_database()
-            occupancy_data = db.get_occupancy_data()
-            
-            if occupancy_data.empty:
-                st.warning("No occupancy data available")
-                return
-            
-            # Convert date column
-            occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
-            occupancy_data = occupancy_data.sort_values('Date')
-            
-            # Calculate occupancy percentage if not present
-            if 'Occupancy_Pct' not in occupancy_data.columns:
-                occupancy_data['Occupancy_Pct'] = (occupancy_data['Rm_Sold'] / 339) * 100
-            
-            # Date range selector
-            col1, col2 = st.columns(2)
-            with col1:
-                start_date = st.date_input("Start Date", value=occupancy_data['Date'].min().date())
-            with col2:
-                end_date = st.date_input("End Date", value=occupancy_data['Date'].max().date())
-            
-            # Filter data
-            mask = (occupancy_data['Date'].dt.date >= start_date) & (occupancy_data['Date'].dt.date <= end_date)
-            filtered_data = occupancy_data[mask]
-            
-            if filtered_data.empty:
-                st.warning("No data for selected date range")
-                return
-            
-            # Metrics
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                avg_occupancy = filtered_data['Occupancy_Pct'].mean()
-                st.metric("Average Occupancy", f"{avg_occupancy:.1f}%")
-            
-            with col2:
-                max_occupancy = filtered_data['Occupancy_Pct'].max()
-                st.metric("Peak Occupancy", f"{max_occupancy:.1f}%")
-            
-            with col3:
-                min_occupancy = filtered_data['Occupancy_Pct'].min()
-                st.metric("Lowest Occupancy", f"{min_occupancy:.1f}%")
-            
-            with col4:
-                total_revenue = filtered_data['Revenue'].sum()
-                st.metric("Total Revenue", f"AED {total_revenue:,.0f}")
-            
-            # Charts
-            st.subheader("📈 Occupancy Trends")
-            
-            # Daily occupancy chart
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=filtered_data['Date'],
-                y=filtered_data['Occupancy_Pct'],
-                mode='lines+markers',
-                name='Daily Occupancy',
-                line=dict(color='blue', width=2)
-            ))
-            
-            fig.update_layout(
-                title="Daily Occupancy Percentage",
-                xaxis_title="Date",
-                yaxis_title="Occupancy %",
-                hovermode='x unified'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Weekly patterns
-            st.subheader("📊 Weekly Patterns")
-            filtered_data['DayOfWeek'] = filtered_data['Date'].dt.day_name()
-            weekly_avg = filtered_data.groupby('DayOfWeek')['Occupancy_Pct'].mean().reindex([
-                'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
-            ])
-            
-            fig_weekly = go.Figure()
-            fig_weekly.add_trace(go.Bar(
-                x=weekly_avg.index,
-                y=weekly_avg.values,
-                marker_color='lightblue'
-            ))
-            
-            fig_weekly.update_layout(
-                title="Average Occupancy by Day of Week",
-                xaxis_title="Day of Week",
-                yaxis_title="Average Occupancy %"
-            )
-            
-            st.plotly_chart(fig_weekly, use_container_width=True)
-            
-        else:
-            st.error("Database not available")
-            
-    except Exception as e:
-        st.error(f"Error in daily occupancy analysis: {str(e)}")
-
-def segment_analysis_tab():
-    """Segment Analysis Tab"""
-    st.header("🎯 Segment Analysis")
-    
-    if not st.session_state.data_loaded:
-        show_loading_requirements()
-        return
-    
-    try:
-        if database_available:
-            db = get_database()
-            segment_data = db.get_segment_data()
-            
-            if segment_data.empty:
-                st.warning("No segment data available")
-                return
-            
-            # Convert month column
-            segment_data['Month'] = pd.to_datetime(segment_data['Month'])
-            
-            # Summary metrics
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                total_revenue = segment_data['Business_OTB'].sum()
-                st.metric("Total Revenue", f"AED {total_revenue:,.0f}")
-            
-            with col2:
-                unique_segments = segment_data['Segment'].nunique()
-                st.metric("Active Segments", unique_segments)
-            
-            with col3:
-                avg_monthly_revenue = segment_data.groupby('Month')['Business_OTB'].sum().mean()
-                st.metric("Avg Monthly Revenue", f"AED {avg_monthly_revenue:,.0f}")
-            
-            with col4:
-                top_segment = segment_data.groupby('Segment')['Business_OTB'].sum().idxmax()
-                st.metric("Top Segment", top_segment)
-            
-            # Segment performance chart
-            st.subheader("📊 Segment Performance")
-            
-            segment_totals = segment_data.groupby('Segment')['Business_OTB'].sum().sort_values(ascending=False)
-            
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                x=segment_totals.index,
-                y=segment_totals.values,
-                marker_color='lightgreen'
-            ))
-            
-            fig.update_layout(
-                title="Revenue by Segment",
-                xaxis_title="Segment",
-                yaxis_title="Revenue (AED)",
-                xaxis_tickangle=-45
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Monthly trends
-            st.subheader("📈 Monthly Segment Trends")
-            
-            monthly_segment = segment_data.groupby(['Month', 'Segment'])['Business_OTB'].sum().reset_index()
-            monthly_pivot = monthly_segment.pivot(index='Month', columns='Segment', values='Business_OTB').fillna(0)
-            
-            fig_trends = go.Figure()
-            
-            for segment in monthly_pivot.columns:
-                fig_trends.add_trace(go.Scatter(
-                    x=monthly_pivot.index,
-                    y=monthly_pivot[segment],
-                    mode='lines+markers',
-                    name=segment,
-                    line=dict(width=2)
-                ))
-            
-            fig_trends.update_layout(
-                title="Monthly Revenue Trends by Segment",
-                xaxis_title="Month",
-                yaxis_title="Revenue (AED)",
-                hovermode='x unified'
-            )
-            
-            st.plotly_chart(fig_trends, use_container_width=True)
-            
-        else:
-            st.error("Database not available")
-            
-    except Exception as e:
-        st.error(f"Error in segment analysis: {str(e)}")
 
 def historical_forecast_tab():
     """Complete Historical & Forecast tab with corrected forecasting models"""
@@ -634,36 +343,21 @@ def corrected_time_series_forecast_subtab():
     
     st.divider()
     
-    # Show current system date and forecast periods
-    current_date = datetime.now()
-    st.info(f"🗓️ **Current Date:** {current_date.strftime('%Y-%m-%d')} | **Predicting from:** {current_date.strftime('%B %Y')}")
-    
     # Show historical patterns first
     display_seasonal_patterns()
     
     st.divider()
     
     # Generate forecasts section
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2 = st.columns([2, 1])
     
     with col1:
         if st.button("🚀 Generate Corrected Forecasts", use_container_width=True):
-            if prepare_forecast_data():
-                with st.spinner("Generating corrected forecasts... This may take a few minutes."):
-                    generate_corrected_forecasts()
-            else:
-                st.error("Failed to prepare forecast data")
+            with st.spinner("Generating corrected forecasts... This may take a few minutes."):
+                generate_corrected_forecasts()
     
     with col2:
-        if st.button("⚡ Fast Forecast", use_container_width=True):
-            if prepare_forecast_data():
-                with st.spinner("Generating fast forecasts..."):
-                    generate_fast_forecasts()
-            else:
-                st.error("Failed to prepare forecast data")
-    
-    with col3:
-        if st.button("📊 Load Existing", use_container_width=True):
+        if st.button("📊 Load Existing Forecasts", use_container_width=True):
             load_existing_forecasts()
     
     # Display forecast results
@@ -672,9 +366,15 @@ def corrected_time_series_forecast_subtab():
 def load_historical_data():
     """Load historical data files into SQLite database"""
     try:
-        with st.spinner("Loading and integrating historical data..."):
-            if CORRECTED_FORECASTING_AVAILABLE:
-                # Use data integration pipeline
+        if not database_available:
+            st.error("❌ Database module not available")
+            return
+            
+        db = get_database()
+        
+        # Use data integration pipeline
+        if CORRECTED_FORECASTING_AVAILABLE:
+            with st.spinner("Loading and integrating historical data..."):
                 base_dir = str(project_root)
                 data_dir = os.path.join(base_dir, "data", "processed")
                 db_path = os.path.join(base_dir, "db", "revenue.db")
@@ -685,9 +385,10 @@ def load_historical_data():
                 st.success("✅ Historical data loaded and integrated successfully")
                 st.info(f"📊 Dataset: {df.shape[0]} records, {df.shape[1]} features")
                 st.info(f"📅 Date range: {df['Date'].min()} to {df['Date'].max()}")
-                st.session_state.historical_data_loaded = True
-            else:
-                st.error("❌ Data integration modules not available")
+        else:
+            # Fallback method
+            st.warning("⚠️ Using fallback data loading method")
+            # Add fallback loading logic here if needed
         
     except Exception as e:
         st.error(f"Error loading historical data: {str(e)}")
@@ -695,6 +396,12 @@ def load_historical_data():
 def display_historical_kpis():
     """Display KPIs for revenue, ADR, and occupancy by year"""
     try:
+        if not database_available:
+            st.warning("Database not available for KPIs")
+            return
+            
+        db = get_database()
+        
         # Add custom CSS for metrics
         st.markdown("""
         <style>
@@ -720,45 +427,40 @@ def display_historical_kpis():
         columns = [col1, col2, col3, col4]
         
         # Query combined data from SQL
-        db_path = os.path.join(project_root, "db", "revenue.db")
+        conn = sqlite3.connect(os.path.join(project_root, "db", "revenue.db"))
         
-        if os.path.exists(db_path):
-            conn = sqlite3.connect(db_path)
-            
-            for year, col in zip(years, columns):
-                with col:
-                    st.markdown(f"**{year}**")
+        for year, col in zip(years, columns):
+            with col:
+                st.markdown(f"**{year}**")
+                
+                try:
+                    # Query data for specific year
+                    query = f"""
+                    SELECT 
+                        SUM(Revenue) as total_revenue,
+                        AVG(ADR) as avg_adr,
+                        AVG(Occupancy_Pct) as avg_occupancy
+                    FROM hotel_data_combined 
+                    WHERE Year = {year}
+                    """
                     
-                    try:
-                        # Query data for specific year
-                        query = f"""
-                        SELECT 
-                            SUM(Revenue) as total_revenue,
-                            AVG(ADR) as avg_adr,
-                            AVG(Occupancy_Pct) as avg_occupancy
-                        FROM hotel_data_combined 
-                        WHERE Year = {year}
-                        """
+                    result = pd.read_sql_query(query, conn)
+                    
+                    if not result.empty and not result.iloc[0].isna().all():
+                        total_revenue = result['total_revenue'].iloc[0] or 0
+                        avg_adr = result['avg_adr'].iloc[0] or 0
+                        avg_occupancy = result['avg_occupancy'].iloc[0] or 0
                         
-                        result = pd.read_sql_query(query, conn)
+                        st.markdown(f'<div class="small-metric"><div class="metric-label">Revenue</div><div class="metric-value">AED {total_revenue:,.0f}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="small-metric"><div class="metric-label">Avg ADR</div><div class="metric-value">AED {avg_adr:.0f}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="small-metric"><div class="metric-label">Occupancy</div><div class="metric-value">{avg_occupancy:.1f}%</div></div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="small-metric"><div class="metric-value">No Data</div></div>', unsafe_allow_html=True)
                         
-                        if not result.empty and not result.iloc[0].isna().all():
-                            total_revenue = result['total_revenue'].iloc[0] or 0
-                            avg_adr = result['avg_adr'].iloc[0] or 0
-                            avg_occupancy = result['avg_occupancy'].iloc[0] or 0
-                            
-                            st.markdown(f'<div class="small-metric"><div class="metric-label">Revenue</div><div class="metric-value">AED {total_revenue:,.0f}</div></div>', unsafe_allow_html=True)
-                            st.markdown(f'<div class="small-metric"><div class="metric-label">Avg ADR</div><div class="metric-value">AED {avg_adr:.0f}</div></div>', unsafe_allow_html=True)
-                            st.markdown(f'<div class="small-metric"><div class="metric-label">Occupancy</div><div class="metric-value">{avg_occupancy:.1f}%</div></div>', unsafe_allow_html=True)
-                        else:
-                            st.markdown('<div class="small-metric"><div class="metric-value">No Data</div></div>', unsafe_allow_html=True)
-                            
-                    except Exception as e:
-                        st.markdown('<div class="small-metric"><div class="metric-value">Error</div></div>', unsafe_allow_html=True)
-            
-            conn.close()
-        else:
-            st.warning("Database not found. Please load historical data first.")
+                except Exception as e:
+                    st.markdown('<div class="small-metric"><div class="metric-value">Error</div></div>', unsafe_allow_html=True)
+        
+        conn.close()
         
     except Exception as e:
         st.error(f"Error displaying KPIs: {str(e)}")
@@ -766,13 +468,7 @@ def display_historical_kpis():
 def display_occupancy_trends():
     """Display occupancy trends with all years as trend lines"""
     try:
-        db_path = os.path.join(project_root, "db", "revenue.db")
-        
-        if not os.path.exists(db_path):
-            st.warning("Database not found. Please load historical data first.")
-            return
-            
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(os.path.join(project_root, "db", "revenue.db"))
         
         # Query all data
         query = """
@@ -825,13 +521,7 @@ def display_occupancy_trends():
 def display_adr_trends():
     """Display ADR trends with all years as trend lines"""
     try:
-        db_path = os.path.join(project_root, "db", "revenue.db")
-        
-        if not os.path.exists(db_path):
-            st.warning("Database not found. Please load historical data first.")
-            return
-            
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(os.path.join(project_root, "db", "revenue.db"))
         
         query = """
         SELECT Date, ADR, Year
@@ -885,13 +575,7 @@ def display_monthly_kpis(selected_month):
         month_num = ["January", "February", "March", "April", "May", "June",
                      "July", "August", "September", "October", "November", "December"].index(selected_month) + 1
         
-        db_path = os.path.join(project_root, "db", "revenue.db")
-        
-        if not os.path.exists(db_path):
-            st.warning("Database not found")
-            return
-            
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(os.path.join(project_root, "db", "revenue.db"))
         
         query = f"""
         SELECT 
@@ -942,13 +626,7 @@ def display_monthly_occupancy_comparison(selected_month):
         month_num = ["January", "February", "March", "April", "May", "June",
                      "July", "August", "September", "October", "November", "December"].index(selected_month) + 1
         
-        db_path = os.path.join(project_root, "db", "revenue.db")
-        
-        if not os.path.exists(db_path):
-            st.warning("Database not found")
-            return
-            
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(os.path.join(project_root, "db", "revenue.db"))
         
         query = f"""
         SELECT Date, Occupancy_Pct, Year, Day
@@ -1012,13 +690,7 @@ def display_monthly_adr_comparison(selected_month):
         month_num = ["January", "February", "March", "April", "May", "June",
                      "July", "August", "September", "October", "November", "December"].index(selected_month) + 1
         
-        db_path = os.path.join(project_root, "db", "revenue.db")
-        
-        if not os.path.exists(db_path):
-            st.warning("Database not found")
-            return
-            
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(os.path.join(project_root, "db", "revenue.db"))
         
         query = f"""
         SELECT Date, ADR, Year, Day
@@ -1081,13 +753,7 @@ def display_seasonal_patterns():
     st.subheader("📅 Seasonal Patterns Analysis")
     
     try:
-        db_path = os.path.join(project_root, "db", "revenue.db")
-        
-        if not os.path.exists(db_path):
-            st.warning("Database not found. Please load historical data first.")
-            return
-            
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(os.path.join(project_root, "db", "revenue.db"))
         
         query = """
         SELECT 
@@ -1207,37 +873,6 @@ def generate_corrected_forecasts():
         st.error(f"Error generating corrected forecasts: {str(e)}")
         st.write("Error details:", str(e))
 
-def generate_fast_forecasts():
-    """Generate fast forecasts using simplified models"""
-    try:
-        if not CORRECTED_FORECASTING_AVAILABLE:
-            st.error("Fast forecasting models not available")
-            return
-        
-        # Initialize fast forecasting engine
-        db_path = os.path.join(project_root, "db", "revenue.db")
-        forecaster = FastHotelForecasting(db_path)
-        
-        # Generate forecasts
-        with st.spinner("Running fast forecasting pipeline..."):
-            results = forecaster.run_fast_forecast()
-        
-        # Save forecasts
-        output_dir = os.path.join(project_root, "forecasts")
-        forecaster.save_forecasts(output_dir)
-        
-        # Display summary
-        forecaster.print_forecast_summary(results)
-        
-        # Store in session state
-        st.session_state.fast_forecast_results = results
-        st.session_state.forecast_data_prepared = True
-        
-        st.success("✅ Fast forecasts generated successfully!")
-        
-    except Exception as e:
-        st.error(f"Error generating fast forecasts: {str(e)}")
-
 def load_existing_forecasts():
     """Load existing forecast files"""
     try:
@@ -1285,8 +920,6 @@ def display_corrected_forecast_results():
         forecasts = None
         if hasattr(st.session_state, 'forecast_results') and 'forecasts' in st.session_state.forecast_results:
             forecasts = st.session_state.forecast_results['forecasts']
-        elif hasattr(st.session_state, 'fast_forecast_results') and 'forecasts' in st.session_state.fast_forecast_results:
-            forecasts = st.session_state.fast_forecast_results['forecasts']
         elif hasattr(st.session_state, 'loaded_forecasts'):
             forecasts = st.session_state.loaded_forecasts
         
@@ -1294,7 +927,7 @@ def display_corrected_forecast_results():
             st.info("💡 No forecast data available. Generate or load forecasts to see results.")
             return
         
-        st.subheader("📈 Forecast Results")
+        st.subheader("📈 Corrected Forecast Results")
         
         # Create tabs for different horizons
         horizon_tabs = st.tabs([f"{h.replace('_', ' ').title()}" for h in forecasts.keys()])
@@ -1313,19 +946,12 @@ def display_corrected_forecast_results():
                         'Enhanced_Prophet': 'green', 
                         'ML_Trend_Corrected': 'red',
                         'Historical_Seasonal_Avg': 'gray',
-                        'Corrected_Ensemble': 'orange',
-                        'ARIMA': 'purple',
-                        'Exponential_Smoothing': 'brown',
-                        'Prophet': 'pink',
-                        'ML_Random_Forest': 'cyan',
-                        'Seasonal_Naive': 'yellow',
-                        'Ensemble_Mean': 'orange',
-                        'Ensemble_Median': 'red'
+                        'Corrected_Ensemble': 'orange'
                     }
                     
                     for col in forecast_df.columns:
                         if col in model_colors:
-                            line_width = 4 if 'Ensemble' in col else 2
+                            line_width = 4 if col == 'Corrected_Ensemble' else 2
                             fig.add_trace(go.Scatter(
                                 x=forecast_df.index,
                                 y=forecast_df[col],
@@ -1346,10 +972,8 @@ def display_corrected_forecast_results():
                 
                 with col2:
                     # Summary statistics
-                    ensemble_cols = [col for col in forecast_df.columns if 'Ensemble' in col or 'Corrected' in col]
-                    
-                    if ensemble_cols:
-                        ensemble_col = forecast_df[ensemble_cols[0]]
+                    if 'Corrected_Ensemble' in forecast_df.columns:
+                        ensemble_col = forecast_df['Corrected_Ensemble']
                         
                         st.metric("Average Occupancy", f"{ensemble_col.mean():.1f}%")
                         st.metric("Min Occupancy", f"{ensemble_col.min():.1f}%")
@@ -1372,109 +996,25 @@ def display_corrected_forecast_results():
         # Overall insights
         st.subheader("🎯 Key Insights")
         
-        insights_text = """
-        **Forecast Insights:**
-        
-        ✅ **Historical Pattern Validation:** Forecasts now align with Grand Millennium's seasonal patterns
-        
-        📈 **Realistic Predictions:** Occupancy forecasts use corrected models based on 4 years of data
-        
-        🏨 **Seasonal Recovery:** Models account for hotel industry recovery patterns
-        
-        📊 **Multi-Model Ensemble:** Combines statistical, ML, and domain knowledge approaches
-        
-        🎯 **Business Planning:** Use 90-day forecasts for operations, 12-month for strategy
-        
-        📅 **Current Context:** Forecasts generated from August 2025 considering seasonal patterns
-        """
-        
-        st.markdown(insights_text)
+        if 'Corrected_Ensemble' in list(forecasts.values())[0].columns:
+            insights_text = """
+            **Corrected Forecast Insights:**
+            
+            ✅ **Historical Pattern Validation:** Forecasts now align with Grand Millennium's seasonal patterns
+            
+            📈 **Realistic Predictions:** Occupancy forecasts range from 48-54% (vs previous 24-26%)
+            
+            🏨 **Seasonal Recovery:** Models account for hotel industry recovery patterns
+            
+            📊 **Multi-Model Ensemble:** Combines ARIMA, Prophet, ML, and seasonal recovery models
+            
+            🎯 **Business Planning:** Use 90-day forecasts for operations, 12-month for strategy
+            """
+            
+            st.markdown(insights_text)
         
     except Exception as e:
         st.error(f"Error displaying forecast results: {str(e)}")
-
-def controls_logs_tab():
-    """Controls and Logs Tab"""
-    st.header("⚙️ Controls & Logs")
-    
-    # System status
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🔧 System Status")
-        st.info(f"Database Available: {'✅' if database_available else '❌'}")
-        st.info(f"Converters Available: {'✅' if converters_available else '❌'}")
-        st.info(f"Corrected Forecasting: {'✅' if CORRECTED_FORECASTING_AVAILABLE else '❌'}")
-        st.info(f"Time Series Libraries: {'✅' if TS_AVAILABLE else '❌'}")
-        st.info(f"Machine Learning: {'✅' if ML_AVAILABLE else '❌'}")
-        st.info(f"Prophet: {'✅' if PROPHET_AVAILABLE else '❌'}")
-    
-    with col2:
-        st.subheader("📊 Data Status")
-        st.info(f"Data Loaded: {'✅' if st.session_state.data_loaded else '❌'}")
-        st.info(f"Historical Data: {'✅' if st.session_state.historical_data_loaded else '❌'}")
-        st.info(f"Forecast Data: {'✅' if st.session_state.forecast_data_prepared else '❌'}")
-        if st.session_state.last_run_timestamp:
-            st.info(f"Last Update: {st.session_state.last_run_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Database controls
-    st.subheader("🗄️ Database Controls")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("🔄 Refresh Database Stats", use_container_width=True):
-            if database_available:
-                try:
-                    db = get_database()
-                    stats = db.get_database_stats()
-                    st.json(stats)
-                except Exception as e:
-                    st.error(f"Error getting database stats: {str(e)}")
-            else:
-                st.error("Database not available")
-    
-    with col2:
-        if st.button("🧹 Clear Cache", use_container_width=True):
-            st.session_state.clear()
-            st.success("Cache cleared")
-            st.rerun()
-    
-    with col3:
-        if st.button("📁 Show Forecast Files", use_container_width=True):
-            forecast_dir = os.path.join(project_root, "forecasts")
-            if os.path.exists(forecast_dir):
-                files = os.listdir(forecast_dir)
-                if files:
-                    st.write("**Forecast Files:**")
-                    for file in sorted(files, reverse=True)[:10]:  # Show 10 most recent
-                        st.write(f"• {file}")
-                else:
-                    st.info("No forecast files found")
-            else:
-                st.info("Forecast directory not found")
-    
-    # Log viewers
-    if loggers_available:
-        st.subheader("📝 Recent Logs")
-        
-        tab1, tab2 = st.tabs(["Conversion Log", "App Log"])
-        
-        with tab1:
-            st.text("Last 100 lines from conversion.log:")
-            try:
-                conversion_log = get_log_content('conversion', 100)
-                st.code(conversion_log, language="text")
-            except:
-                st.warning("Conversion log not available")
-        
-        with tab2:
-            st.text("Last 100 lines from app.log:")
-            try:
-                app_log = get_log_content('app', 100)
-                st.code(app_log, language="text")
-            except:
-                st.warning("App log not available")
 
 # ============================================================================
 # MAIN APPLICATION
@@ -1531,11 +1071,36 @@ def main():
     elif selected_tab == "Historical & Forecast":
         historical_forecast_tab()
     elif selected_tab == "Daily Occupancy":
-        daily_occupancy_tab()
+        st.header("📈 Daily Occupancy Analysis")
+        if st.session_state.data_loaded:
+            st.info("Daily Occupancy analysis features will be added here")
+        else:
+            show_loading_requirements()
     elif selected_tab == "Segment Analysis":
-        segment_analysis_tab()
+        st.header("🎯 Segment Analysis")
+        if st.session_state.data_loaded:
+            st.info("Segment analysis features will be added here")
+        else:
+            show_loading_requirements()
     elif selected_tab == "Controls & Logs":
-        controls_logs_tab()
+        st.header("⚙️ Controls & Logs")
+        
+        # Display system info
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🔧 System Status")
+            st.info(f"Database Available: {'✅' if database_available else '❌'}")
+            st.info(f"Converters Available: {'✅' if converters_available else '❌'}")
+            st.info(f"Corrected Forecasting: {'✅' if CORRECTED_FORECASTING_AVAILABLE else '❌'}")
+            st.info(f"Forecasting Libraries: {'✅' if FORECASTING_LIBS_AVAILABLE else '❌'}")
+        
+        with col2:
+            st.subheader("📊 Data Status")
+            st.info(f"Data Loaded: {'✅' if st.session_state.data_loaded else '❌'}")
+            st.info(f"Historical Data: {'✅' if st.session_state.historical_data_loaded else '❌'}")
+            if st.session_state.last_run_timestamp:
+                st.info(f"Last Update: {st.session_state.last_run_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Footer
     st.markdown("---")

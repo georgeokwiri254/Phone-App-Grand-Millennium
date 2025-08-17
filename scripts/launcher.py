@@ -16,7 +16,7 @@ def main():
     try:
         # Get the project root directory (parent of scripts)
         project_root = Path(__file__).parent.parent
-        app_path = project_root / "app" / "streamlit_app.py"
+        app_path = project_root / "app" / "streamlit_app_simple.py"
         
         print("Grand Millennium Revenue Analytics")
         print("=" * 50)
