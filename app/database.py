@@ -713,6 +713,71 @@ class RevenueDatabase:
             logger.error(f"Failed to get historical segment data from {table_name}: {e}")
             return pd.DataFrame()
     
+    def save_combined_forecast_data(self, df: pd.DataFrame) -> bool:
+        """
+        Save combined forecast data to database
+        
+        Args:
+            df: DataFrame with combined forecast data
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            cursor = self.connection.cursor()
+            
+            # Create table if it doesn't exist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS combined_forecast_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Date TEXT,
+                    "Rm Sold" REAL,
+                    Revenue REAL,
+                    ADR REAL,
+                    RevPar REAL,
+                    Occupancy_Pct REAL,
+                    Year INTEGER,
+                    Month INTEGER,
+                    DayOfWeek INTEGER,
+                    DayOfYear INTEGER,
+                    Quarter INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Clear existing data
+            cursor.execute("DELETE FROM combined_forecast_data")
+            
+            # Insert data
+            df.to_sql('combined_forecast_data', self.connection, if_exists='append', index=False)
+            self.connection.commit()
+            
+            logger.info(f"Successfully saved {len(df)} combined forecast records")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save combined forecast data: {e}")
+            return False
+    
+    def get_combined_forecast_data(self) -> pd.DataFrame:
+        """
+        Get combined forecast data from database
+        
+        Returns:
+            DataFrame with combined forecast data
+        """
+        try:
+            query = "SELECT * FROM combined_forecast_data ORDER BY Date"
+            df = pd.read_sql_query(query, self.connection)
+            if not df.empty:
+                df['Date'] = pd.to_datetime(df['Date'])
+                logger.info(f"Retrieved {len(df)} combined forecast records")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to get combined forecast data: {e}")
+            return pd.DataFrame()
+
     def close(self):
         """Close database connection"""
         if self.connection:

@@ -2710,15 +2710,13 @@ def time_series_forecast_subtab():
     # Display forecast preparation status
     if prepare_forecast_data():
         # Forecast horizon selection
-        st.write("**Forecast Horizons:**")
-        col1, col2, col3 = st.columns(3)
+        st.write("**Recommended Forecast Horizons (Per Documentation):**")
+        col1, col2 = st.columns(2)
         
         with col1:
-            st.info("📅 **Short-term (3 months)**\nOperational planning, rate decisions")
+            st.info("📅 **90-Day Operational Forecast**\nDaily/weekly rolling forecast for operations\n• Rate decisions and yield management\n• Tactical staffing and resource planning")
         with col2:
-            st.info("📅 **Medium-term (6 months)**\nQuarterly budgeting, promotions")
-        with col3:
-            st.info("📅 **Long-term (12 months)**\nAnnual budgeting, strategic planning")
+            st.info("📅 **12-Month Strategic Forecast**\nMonthly refreshed scenario forecast\n• Annual budgeting and capital planning\n• Long-term strategic decisions")
         
         st.divider()
         
@@ -3211,9 +3209,15 @@ def display_monthly_adr_comparison(selected_month):
         st.error(f"Error displaying monthly ADR comparison: {str(e)}")
 
 def prepare_forecast_data():
-    """Prepare and combine all historical data for forecasting"""
+    """Prepare and combine all historical data for forecasting, store in SQL"""
     try:
         db = get_database()
+        
+        # Check if combined data already exists
+        combined_data = db.get_combined_forecast_data()
+        if not combined_data.empty:
+            st.session_state.forecast_data = combined_data
+            return True
         
         # Combine all historical data
         all_data = []
@@ -3256,6 +3260,16 @@ def prepare_forecast_data():
         # Calculate occupancy percentage
         combined_data['Occupancy_Pct'] = (combined_data['Rm Sold'] / 339) * 100
         
+        # Add calendar features for analysis
+        combined_data['Year'] = combined_data['Date'].dt.year
+        combined_data['Month'] = combined_data['Date'].dt.month
+        combined_data['DayOfWeek'] = combined_data['Date'].dt.dayofweek
+        combined_data['DayOfYear'] = combined_data['Date'].dt.dayofyear
+        combined_data['Quarter'] = combined_data['Date'].dt.quarter
+        
+        # Save to SQL for future use
+        db.save_combined_forecast_data(combined_data)
+        
         # Store in session state
         st.session_state.forecast_data = combined_data
         return True
@@ -3279,17 +3293,14 @@ def generate_all_forecasts():
         # Get current date
         current_date = datetime.now()
         
-        # Generate forecasts for each horizon
+        # Generate forecasts for recommended horizons
         forecasts = {}
         
-        # 3-month forecast (SARIMA/Prophet)
-        forecasts['3_month'] = generate_short_term_forecast(data, current_date, 90)
+        # 90-day operational forecast (SARIMA/Prophet with occupancy regressors)
+        forecasts['90_day'] = generate_operational_forecast(data, current_date, 90)
         
-        # 6-month forecast (XGBoost/ML)
-        forecasts['6_month'] = generate_medium_term_forecast(data, current_date, 180)
-        
-        # 12-month forecast (Ensemble/TBATS)
-        forecasts['12_month'] = generate_long_term_forecast(data, current_date, 365)
+        # 12-month strategic forecast (Seasonal decomposition/ensemble)
+        forecasts['12_month'] = generate_strategic_forecast(data, current_date, 365)
         
         # Store forecasts
         st.session_state.forecasts = forecasts
@@ -3299,7 +3310,7 @@ def generate_all_forecasts():
     except Exception as e:
         st.error(f"Error generating forecasts: {str(e)}")
 
-def generate_short_term_forecast(data, current_date, days):
+def generate_operational_forecast(data, current_date, days):
     """Generate 3-month forecast using SARIMA or Prophet"""
     try:
         # Use Revenue for forecasting
@@ -3403,7 +3414,7 @@ def generate_medium_term_forecast(data, current_date, days):
             df_clean = df.dropna()
             
             if len(df_clean) < 100:  # Need sufficient data
-                return generate_short_term_forecast(data, current_date, days)
+                return generate_operational_forecast(data, current_date, days)
             
             # Prepare features and target
             feature_cols = [col for col in df_clean.columns if col != 'Revenue' and 'lag' in col or 'roll' in col or col in ['dayofweek', 'month', 'quarter']]
@@ -3424,7 +3435,7 @@ def generate_medium_term_forecast(data, current_date, days):
                 # Create future feature row
                 future_row = last_data.copy()
                 future_row.index = [future_date]
-                future_row['dayofweek'] = future_date.dayofweek
+                future_row['dayofweek'] = future_date.weekday()
                 future_row['month'] = future_date.month
                 future_row['quarter'] = (future_date.month - 1) // 3 + 1
                 
@@ -3445,14 +3456,14 @@ def generate_medium_term_forecast(data, current_date, days):
             }
         
         else:
-            # Fallback to short-term method
-            return generate_short_term_forecast(data, current_date, days)
+            # Fallback to operational method
+            return generate_operational_forecast(data, current_date, days)
             
     except Exception as e:
         st.error(f"Error in medium-term forecast: {str(e)}")
-        return generate_short_term_forecast(data, current_date, days)
+        return generate_operational_forecast(data, current_date, days)
 
-def generate_long_term_forecast(data, current_date, days):
+def generate_strategic_forecast(data, current_date, days):
     """Generate 12-month forecast using ensemble methods"""
     try:
         # For long-term, use simpler but more robust approaches
@@ -3517,8 +3528,8 @@ def generate_long_term_forecast(data, current_date, days):
             }
             
     except Exception as e:
-        st.error(f"Error in long-term forecast: {str(e)}")
-        return generate_short_term_forecast(data, current_date, days)
+        st.error(f"Error in strategic forecast: {str(e)}")
+        return generate_operational_forecast(data, current_date, days)
 
 def display_forecast_results():
     """Display forecast results in KPI cards and charts"""
@@ -3531,50 +3542,32 @@ def display_forecast_results():
     # Display KPI cards
     st.subheader("🎯 Forecast KPIs")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
-    # 3-month KPI
-    if forecasts.get('3_month'):
-        forecast_3m = forecasts['3_month']
+    # 90-day Operational KPI
+    if forecasts.get('90_day'):
+        forecast_90d = forecasts['90_day']
         with col1:
             st.metric(
-                label="📅 3-Month Revenue Forecast",
-                value=f"AED {forecast_3m['revenue_total']:,.0f}",
-                delta=f"Model: {forecast_3m['model']}"
+                label="📅 90-Day Operational Forecast",
+                value=f"AED {forecast_90d['revenue_total']:,.0f}",
+                delta=f"Model: {forecast_90d['model']}"
             )
             st.metric(
                 label="Average ADR",
-                value=f"AED {forecast_3m['avg_adr']:.0f}"
+                value=f"AED {forecast_90d['avg_adr']:.0f}"
             )
             st.metric(
                 label="Average Occupancy",
-                value=f"{forecast_3m['avg_occupancy']:.1f}%"
+                value=f"{forecast_90d['avg_occupancy']:.1f}%"
             )
     
-    # 6-month KPI
-    if forecasts.get('6_month'):
-        forecast_6m = forecasts['6_month']
-        with col2:
-            st.metric(
-                label="📅 6-Month Revenue Forecast",
-                value=f"AED {forecast_6m['revenue_total']:,.0f}",
-                delta=f"Model: {forecast_6m['model']}"
-            )
-            st.metric(
-                label="Average ADR",
-                value=f"AED {forecast_6m['avg_adr']:.0f}"
-            )
-            st.metric(
-                label="Average Occupancy",
-                value=f"{forecast_6m['avg_occupancy']:.1f}%"
-            )
-    
-    # 12-month KPI
+    # 12-month Strategic KPI
     if forecasts.get('12_month'):
         forecast_12m = forecasts['12_month']
-        with col3:
+        with col2:
             st.metric(
-                label="📅 12-Month Revenue Forecast",
+                label="📅 12-Month Strategic Forecast",
                 value=f"AED {forecast_12m['revenue_total']:,.0f}",
                 delta=f"Model: {forecast_12m['model']}"
             )
@@ -3618,10 +3611,10 @@ def display_forecast_charts(forecasts):
             ))
         
         # Add forecast lines
-        colors = ['orange', 'green', 'purple']
-        names = ['3-Month', '6-Month', '12-Month']
+        colors = ['#FF8C00', '#8A2BE2']  # Orange, Purple in hex
+        names = ['90-Day Operational', '12-Month Strategic']
         
-        for i, (key, color, name) in enumerate(zip(['3_month', '6_month', '12_month'], colors, names)):
+        for i, (key, color, name) in enumerate(zip(['90_day', '12_month'], colors, names)):
             if forecasts.get(key):
                 forecast = forecasts[key]
                 
@@ -3634,12 +3627,18 @@ def display_forecast_charts(forecasts):
                     line=dict(color=color, width=2, dash='dash')
                 ))
                 
+                # Convert hex to rgba for confidence intervals
+                if color == '#FF8C00':  # Orange
+                    rgba_color = 'rgba(255, 140, 0, 0.1)'
+                else:  # Purple
+                    rgba_color = 'rgba(138, 43, 226, 0.1)'
+                
                 # Confidence intervals
                 fig.add_trace(go.Scatter(
                     x=list(forecast['dates']) + list(forecast['dates'][::-1]),
                     y=list(forecast['upper']) + list(forecast['lower'][::-1]),
                     fill='tonexty' if i == 0 else 'toself',
-                    fillcolor=f'rgba({color}, 0.1)',
+                    fillcolor=rgba_color,
                     line=dict(color='rgba(255,255,255,0)'),
                     name=f'{name} Confidence Interval',
                     showlegend=False
@@ -3665,36 +3664,28 @@ def display_forecast_charts(forecasts):
         # Model information
         st.subheader("🔍 Model Information")
         
-        info_col1, info_col2, info_col3 = st.columns(3)
+        info_col1, info_col2 = st.columns(2)
         
         with info_col1:
-            if forecasts.get('3_month'):
+            if forecasts.get('90_day'):
                 st.info(f"""
-                **3-Month Forecast**
-                - Model: {forecasts['3_month']['model']}
-                - Best for: Operational planning
-                - Accuracy: High
-                - Use case: Rate decisions, staffing
+                **90-Day Operational Forecast**
+                - Model: {forecasts['90_day']['model']}
+                - Best for: Daily/weekly operations
+                - Accuracy: High (recent patterns)
+                - Use case: Rate decisions, yield management, staffing
+                - Update frequency: Daily/weekly rolling
                 """)
         
         with info_col2:
-            if forecasts.get('6_month'):
-                st.info(f"""
-                **6-Month Forecast**
-                - Model: {forecasts['6_month']['model']}
-                - Best for: Tactical planning
-                - Accuracy: Medium
-                - Use case: Promotions, budgeting
-                """)
-        
-        with info_col3:
             if forecasts.get('12_month'):
                 st.info(f"""
-                **12-Month Forecast**
+                **12-Month Strategic Forecast**
                 - Model: {forecasts['12_month']['model']}
-                - Best for: Strategic planning
+                - Best for: Annual planning
                 - Accuracy: Lower (wider intervals)
-                - Use case: Annual budgets, capital planning
+                - Use case: Budgets, capital planning, scenarios
+                - Update frequency: Monthly refresh
                 """)
         
     except Exception as e:
