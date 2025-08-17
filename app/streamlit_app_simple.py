@@ -5244,8 +5244,26 @@ def main():
         
         st.markdown("---")
         
-        # Navigation
-        st.markdown("### 📊 Navigation")
+        # Navigation with italic styling
+        st.markdown("### 📊 *Navigation*")
+        
+        # Add CSS for italic radio button options
+        st.markdown("""
+        <style>
+        .stRadio label {
+            font-style: italic !important;
+        }
+        .stRadio label span {
+            font-style: italic !important;
+        }
+        div[data-testid="stRadio"] label {
+            font-style: italic !important;
+        }
+        div[data-testid="stRadio"] label span {
+            font-style: italic !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         
         navigation_options = [
             "Dashboard",
@@ -5265,9 +5283,9 @@ def main():
         
         current_tab = st.session_state.current_tab
         
-        # Radio buttons for navigation
+        # Radio buttons for navigation (now italic)
         selected_tab = st.radio(
-            "Choose a section:",
+            "*Choose a section:*",
             navigation_options,
             index=navigation_options.index(current_tab) if current_tab in navigation_options else 0
         )
