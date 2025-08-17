@@ -2153,456 +2153,986 @@ def events_analysis_tab():
         st.info("No block data available for events correlation analysis.")
 
 def historical_forecast_tab():
-    """Historical & Forecast Tab with corrected time series forecasting"""
-    st.header("📈 Historical & Forecast Analytics")
+    """Historical & Forecast tab with sub-tabs for analysis and forecasting"""
+    st.header("📊 Historical & Forecast Analysis")
     
-    if not st.session_state.data_loaded:
-        show_loading_requirements()
-        return
+    # Initialize historical data if not already loaded
+    if 'historical_data_loaded' not in st.session_state:
+        st.session_state.historical_data_loaded = False
     
-    if not CORRECTED_FORECASTING_AVAILABLE:
-        st.error("⚠️ Corrected forecasting module not available")
-        st.info("Please ensure all required modules are installed: corrected_forecasting, data_integration, fast_forecasting")
-        return
+    # Load historical data into SQLite
+    if not st.session_state.historical_data_loaded:
+        load_historical_data()
+        st.session_state.historical_data_loaded = True
     
-    # Get data
-    if st.session_state.segment_data is not None:
-        segment_data = st.session_state.segment_data
+    # Create sub-tabs
+    tab1, tab2 = st.tabs(["📊 Trend Analysis", "🔮 Time Series Forecast"])
+    
+    with tab1:
+        trend_analysis_subtab()
+    
+    with tab2:
+        time_series_forecast_subtab()
+
+def trend_analysis_subtab():
+    """Trend Analysis sub-tab - existing functionality"""
+    # Display static KPIs at the top with smaller font
+    display_historical_kpis()
+    
+    st.divider()
+    
+    # Large trend charts section
+    st.subheader("📈 Daily Occupancy Trends (2022-2025)")
+    display_occupancy_trends()
+    
+    st.divider()
+    
+    st.subheader("💰 ADR Trends (2022-2025)")
+    display_adr_trends()
+    
+    st.divider()
+    
+    # Month filter section
+    st.subheader("📊 Monthly Comparison Analysis")
+    
+    # Month selection
+    months = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+    
+    selected_month = st.selectbox(
+        "Select Month for Comparison:",
+        months,
+        index=7,  # Default to August
+        help="Compare data across years for the selected month"
+    )
+    
+    # Display responsive KPIs for selected month
+    display_monthly_kpis(selected_month)
+    
+    # Monthly comparison charts - Occupancy above, ADR below
+    st.write("##### Monthly Occupancy Comparison")
+    display_monthly_occupancy_comparison(selected_month)
+    
+    st.divider()
+    
+    st.write("##### Monthly ADR Comparison")
+    display_monthly_adr_comparison(selected_month)
+
+def time_series_forecast_subtab():
+    """Time Series Forecast sub-tab - advanced forecasting"""
+    st.subheader("🔮 Time Series Forecasting")
+    
+    # Display forecast preparation status
+    if prepare_forecast_data():
+        # Forecast horizon selection
+        st.write("**Recommended Forecast Horizons (Per Documentation):**")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.info("📅 **90-Day Operational Forecast**\nDaily/weekly rolling forecast for operations\n• Rate decisions and yield management\n• Tactical staffing and resource planning")
+        with col2:
+            st.info("📅 **12-Month Strategic Forecast**\nMonthly refreshed scenario forecast\n• Annual budgeting and capital planning\n• Long-term strategic decisions")
+        
+        st.divider()
+        
+        # Generate forecasts
+        if st.button("🚀 Generate Forecasts", use_container_width=True):
+            with st.spinner("Generating forecasts... This may take a few minutes."):
+                generate_all_forecasts()
+        
+        # Display existing forecasts if available
+        display_forecast_results()
     else:
-        if database_available:
-            segment_data = get_database().get_segment_data()
-        else:
-            segment_data = pd.DataFrame()
+        st.error("❌ Unable to prepare forecast data. Please ensure historical data is properly loaded.")
+
+def load_historical_data():
+    """Load historical data files into SQLite database"""
+    try:
+        db = get_database()
+        
+        # Historical occupancy files
+        occupancy_files = [
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/historical_occupancy_2022_040906 - historical_occupancy_2022_040906.csv.csv",
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/historical_occupancy_2023_040911 - historical_occupancy_2023_040911.csv.csv",
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/historical_occupancy_2024_040917 - historical_occupancy_2024_040917.csv.csv"
+        ]
+        
+        # Historical segment files
+        segment_files = [
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/Historical-segemtent_2022_ 032622 - Historical-segemtent_2022_ 032622.csv.csv",
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/Historical_segment_2023_032649 - Historical_segment_2023_032649.csv.csv",
+            "/home/gee_devops254/Downloads/Revenue Architecture/data/processed/Historical_segment_2024_045642.csv (1).csv"
+        ]
+        
+        # Load occupancy data
+        for file_path in occupancy_files:
+            if os.path.exists(file_path):
+                df = pd.read_csv(file_path)
+                df['Year'] = pd.to_datetime(df['Date']).dt.year
+                
+                # Calculate occupancy percentage
+                df['Occupancy_Pct'] = (df['Rm Sold'] / 339) * 100
+                
+                # Save updated CSV with occupancy percentage
+                year = df['Year'].iloc[0]
+                updated_file_path = file_path.replace('.csv', '_updated.csv')
+                df.to_csv(updated_file_path, index=False)
+                
+                table_name = f"historical_occupancy_{year}"
+                db.save_historical_occupancy_data(df, table_name)
+        
+        # Load segment data
+        for file_path in segment_files:
+            if os.path.exists(file_path):
+                df = pd.read_csv(file_path)
+                df['Year'] = pd.to_datetime(df['Month']).dt.year
+                table_name = f"historical_segment_{df['Year'].iloc[0]}"
+                db.save_historical_segment_data(df, table_name)
+        
+        st.success("✅ Historical data loaded successfully into SQLite database")
+        
+    except Exception as e:
+        st.error(f"Error loading historical data: {str(e)}")
+
+def display_historical_kpis():
+    """Display KPIs for revenue, ADR, and occupancy by year with smaller fonts"""
+    try:
+        db = get_database()
+        
+        # Add custom CSS for smaller metrics
+        st.markdown("""
+        <style>
+        .small-metric {
+            font-size: 0.8rem;
+        }
+        .small-metric .metric-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        .small-metric .metric-label {
+            font-size: 0.7rem;
+            color: #666;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Create 4 columns for KPIs (2022, 2023, 2024, 2025)
+        col1, col2, col3, col4 = st.columns(4)
+        
+        years = [2022, 2023, 2024, 2025]
+        columns = [col1, col2, col3, col4]
+        
+        for year, col in zip(years, columns):
+            with col:
+                st.markdown(f"**{year}**")
+                
+                if year < 2025:
+                    # Get historical data
+                    occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+                    
+                    if not occupancy_data.empty:
+                        total_revenue = occupancy_data['Revenue'].sum()
+                        avg_adr = occupancy_data['ADR'].mean()
+                        total_rooms_sold = occupancy_data['Rm Sold'].sum()
+                        total_days = len(occupancy_data)
+                        avg_occupancy_pct = (total_rooms_sold / (total_days * 339)) * 100 if total_days > 0 else 0
+                        
+                        # Use smaller metrics
+                        st.markdown(f'<div class="small-metric"><div class="metric-label">Revenue</div><div class="metric-value">AED {total_revenue:,.0f}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="small-metric"><div class="metric-label">Avg ADR</div><div class="metric-value">AED {avg_adr:.0f}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="small-metric"><div class="metric-label">Occupancy</div><div class="metric-value">{avg_occupancy_pct:.1f}%</div></div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="small-metric"><div class="metric-value">No Data</div></div>', unsafe_allow_html=True)
+                else:
+                    # 2025 - Current year data from main tables
+                    current_data = db.get_occupancy_data()
+                    if not current_data.empty:
+                        # Filter for 2025 data
+                        current_data['Date'] = pd.to_datetime(current_data['Date'])
+                        current_2025 = current_data[current_data['Date'].dt.year == 2025]
+                        
+                        if not current_2025.empty:
+                            total_revenue = current_2025['Revenue'].sum()
+                            avg_adr = current_2025['ADR'].mean()
+                            total_rooms_sold = current_2025['Rm_Sold'].sum()
+                            total_days = len(current_2025)
+                            avg_occupancy_pct = (total_rooms_sold / (total_days * 339)) * 100 if total_days > 0 else 0
+                            
+                            st.markdown(f'<div class="small-metric"><div class="metric-label">Revenue</div><div class="metric-value">AED {total_revenue:,.0f}</div></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="small-metric"><div class="metric-label">Avg ADR</div><div class="metric-value">AED {avg_adr:.0f}</div></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="small-metric"><div class="metric-label">Occupancy</div><div class="metric-value">{avg_occupancy_pct:.1f}%</div></div>', unsafe_allow_html=True)
+                        else:
+                            st.markdown('<div class="small-metric"><div class="metric-value">No Data</div></div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="small-metric"><div class="metric-value">No Data</div></div>', unsafe_allow_html=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying KPIs: {str(e)}")
+
+def display_occupancy_trends():
+    """Display occupancy trends with all years as trend lines"""
+    try:
+        db = get_database()
+        fig = go.Figure()
+        
+        # Add trend lines for 2022-2024
+        for year in [2022, 2023, 2024]:
+            occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+            if not occupancy_data.empty:
+                occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                occupancy_data = occupancy_data.sort_values('Date')
+                # Calculate occupancy percentage
+                occupancy_data['Occupancy_Pct'] = (occupancy_data['Rm Sold'] / 339) * 100
+                
+                fig.add_trace(go.Scatter(
+                    x=occupancy_data['Date'],
+                    y=occupancy_data['Occupancy_Pct'],
+                    mode='lines',
+                    name=f'{year} Occupancy',
+                    line=dict(width=2)
+                ))
+        
+        # Add 2025 data as trend line
+        current_data = db.get_occupancy_data()
+        if not current_data.empty:
+            current_data['Date'] = pd.to_datetime(current_data['Date'])
+            current_2025 = current_data[current_data['Date'].dt.year == 2025].sort_values('Date')
             
-    if st.session_state.occupancy_data is not None:
-        occupancy_data = st.session_state.occupancy_data
-    else:
-        if database_available:
-            occupancy_data = get_database().get_occupancy_data()
-        else:
-            occupancy_data = pd.DataFrame()
-    
-    if segment_data.empty and occupancy_data.empty:
-        st.error("No data available for historical analysis and forecasting")
+            if not current_2025.empty:
+                # Calculate occupancy percentage for 2025
+                current_2025['Occupancy_Pct'] = (current_2025['Rm_Sold'] / 339) * 100
+                
+                fig.add_trace(go.Scatter(
+                    x=current_2025['Date'],
+                    y=current_2025['Occupancy_Pct'],
+                    mode='lines',
+                    name='2025 Occupancy',
+                    line=dict(width=3, color='orange')
+                ))
+        
+        fig.update_layout(
+            title="Daily Occupancy Trends (2022-2025)",
+            xaxis_title="Date",
+            yaxis_title="Occupancy Percentage (%)",
+            hovermode='x unified',
+            height=600,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying occupancy trends: {str(e)}")
+
+def display_adr_trends():
+    """Display ADR trends with all years as trend lines"""
+    try:
+        db = get_database()
+        fig = go.Figure()
+        
+        # Add trend lines for 2022-2024
+        for year in [2022, 2023, 2024]:
+            occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+            if not occupancy_data.empty:
+                occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                occupancy_data = occupancy_data.sort_values('Date')
+                
+                fig.add_trace(go.Scatter(
+                    x=occupancy_data['Date'],
+                    y=occupancy_data['ADR'],
+                    mode='lines',
+                    name=f'{year} ADR',
+                    line=dict(width=2)
+                ))
+        
+        # Add 2025 data as trend line
+        current_data = db.get_occupancy_data()
+        if not current_data.empty:
+            current_data['Date'] = pd.to_datetime(current_data['Date'])
+            current_2025 = current_data[current_data['Date'].dt.year == 2025].sort_values('Date')
+            
+            if not current_2025.empty:
+                fig.add_trace(go.Scatter(
+                    x=current_2025['Date'],
+                    y=current_2025['ADR'],
+                    mode='lines',
+                    name='2025 ADR',
+                    line=dict(width=3, color='green')
+                ))
+        
+        fig.update_layout(
+            title="ADR Trends (2022-2025)",
+            xaxis_title="Date",
+            yaxis_title="ADR (AED)",
+            hovermode='x unified',
+            height=600,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying ADR trends: {str(e)}")
+
+def display_monthly_kpis(selected_month):
+    """Display responsive KPIs for selected month with very small text"""
+    try:
+        db = get_database()
+        month_num = ["January", "February", "March", "April", "May", "June",
+                     "July", "August", "September", "October", "November", "December"].index(selected_month) + 1
+        
+        # Add custom CSS for responsive metrics matching static KPIs
+        st.markdown("""
+        <style>
+        .responsive-metric {
+            font-size: 0.9rem;
+            text-align: center;
+            padding: 8px;
+            margin: 3px;
+        }
+        .responsive-metric .metric-value {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #000000;
+            margin-bottom: 2px;
+        }
+        .responsive-metric .metric-label {
+            font-size: 0.8rem;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 3px;
+        }
+        .responsive-kpi-container {
+            display: flex;
+            justify-content: space-around;
+            margin: 15px 0;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Create KPI container
+        kpi_data = []
+        
+        # Get data for each year
+        for year in [2022, 2023, 2024, 2025]:
+            if year < 2025:
+                # Historical data
+                occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+                if not occupancy_data.empty:
+                    occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                    month_data = occupancy_data[occupancy_data['Date'].dt.month == month_num]
+                    
+                    if not month_data.empty:
+                        revenue = month_data['Revenue'].sum()
+                        adr = month_data['ADR'].mean()
+                        occupancy_pct = (month_data['Rm Sold'].sum() / (len(month_data) * 339)) * 100
+                    else:
+                        revenue = 0
+                        adr = 0
+                        occupancy_pct = 0
+                else:
+                    revenue = 0
+                    adr = 0
+                    occupancy_pct = 0
+            else:
+                # 2025 current data
+                current_data = db.get_occupancy_data()
+                if not current_data.empty:
+                    current_data['Date'] = pd.to_datetime(current_data['Date'])
+                    month_data = current_data[(current_data['Date'].dt.year == 2025) & 
+                                            (current_data['Date'].dt.month == month_num)]
+                    
+                    if not month_data.empty:
+                        revenue = month_data['Revenue'].sum()
+                        adr = month_data['ADR'].mean()
+                        occupancy_pct = (month_data['Rm_Sold'].sum() / (len(month_data) * 339)) * 100
+                    else:
+                        revenue = 0
+                        adr = 0
+                        occupancy_pct = 0
+                else:
+                    revenue = 0
+                    adr = 0
+                    occupancy_pct = 0
+            
+            kpi_data.append({
+                'year': year,
+                'revenue': revenue,
+                'adr': adr,
+                'occupancy': occupancy_pct
+            })
+        
+        # Display KPIs in a compact format
+        st.markdown(f"**KPIs for {selected_month} (All Years)**")
+        
+        # Revenue KPIs
+        revenue_html = '<div class="responsive-kpi-container">'
+        revenue_html += '<div class="responsive-metric"><div class="metric-label">Revenue</div></div>'
+        for data in kpi_data:
+            revenue_html += f'<div class="responsive-metric"><div class="metric-label">{data["year"]}</div><div class="metric-value">AED {data["revenue"]:,.0f}</div></div>'
+        revenue_html += '</div>'
+        
+        # ADR KPIs
+        adr_html = '<div class="responsive-kpi-container">'
+        adr_html += '<div class="responsive-metric"><div class="metric-label">ADR</div></div>'
+        for data in kpi_data:
+            adr_html += f'<div class="responsive-metric"><div class="metric-label">{data["year"]}</div><div class="metric-value">AED {data["adr"]:.0f}</div></div>'
+        adr_html += '</div>'
+        
+        # Occupancy KPIs
+        occupancy_html = '<div class="responsive-kpi-container">'
+        occupancy_html += '<div class="responsive-metric"><div class="metric-label">Occupancy</div></div>'
+        for data in kpi_data:
+            occupancy_html += f'<div class="responsive-metric"><div class="metric-label">{data["year"]}</div><div class="metric-value">{data["occupancy"]:.1f}%</div></div>'
+        occupancy_html += '</div>'
+        
+        st.markdown(revenue_html, unsafe_allow_html=True)
+        st.markdown(adr_html, unsafe_allow_html=True)
+        st.markdown(occupancy_html, unsafe_allow_html=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying monthly KPIs: {str(e)}")
+
+def display_monthly_occupancy_comparison(selected_month):
+    """Display monthly occupancy comparison: 2025 bars + historical trend lines"""
+    try:
+        db = get_database()
+        month_num = ["January", "February", "March", "April", "May", "June",
+                     "July", "August", "September", "October", "November", "December"].index(selected_month) + 1
+        
+        fig = go.Figure()
+        
+        # Add historical trend lines (2022-2024)
+        for year in [2022, 2023, 2024]:
+            occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+            if not occupancy_data.empty:
+                occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                month_data = occupancy_data[occupancy_data['Date'].dt.month == month_num].sort_values('Date')
+                
+                if not month_data.empty:
+                    month_data['Occupancy_Pct'] = (month_data['Rm Sold'] / 339) * 100
+                    
+                    fig.add_trace(go.Scatter(
+                        x=month_data['Date'].dt.day,
+                        y=month_data['Occupancy_Pct'],
+                        mode='lines',
+                        name=f'{year}',
+                        line=dict(width=2)
+                    ))
+        
+        # Add 2025 data as bars
+        current_data = db.get_occupancy_data()
+        if not current_data.empty:
+            current_data['Date'] = pd.to_datetime(current_data['Date'])
+            month_2025 = current_data[(current_data['Date'].dt.year == 2025) & 
+                                    (current_data['Date'].dt.month == month_num)].sort_values('Date')
+            
+            if not month_2025.empty:
+                month_2025['Occupancy_Pct'] = (month_2025['Rm_Sold'] / 339) * 100
+                
+                fig.add_trace(go.Bar(
+                    x=month_2025['Date'].dt.day,
+                    y=month_2025['Occupancy_Pct'],
+                    name='2025',
+                    opacity=0.7,
+                    marker_color='orange'
+                ))
+        
+        fig.update_layout(
+            title=f"{selected_month} Occupancy Comparison",
+            xaxis_title="Day of Month",
+            yaxis_title="Occupancy %",
+            hovermode='x unified',
+            height=400,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying monthly occupancy comparison: {str(e)}")
+
+def display_monthly_adr_comparison(selected_month):
+    """Display monthly ADR comparison: 2025 bars + historical trend lines"""
+    try:
+        db = get_database()
+        month_num = ["January", "February", "March", "April", "May", "June",
+                     "July", "August", "September", "October", "November", "December"].index(selected_month) + 1
+        
+        fig = go.Figure()
+        
+        # Add historical trend lines (2022-2024)
+        for year in [2022, 2023, 2024]:
+            occupancy_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+            if not occupancy_data.empty:
+                occupancy_data['Date'] = pd.to_datetime(occupancy_data['Date'])
+                month_data = occupancy_data[occupancy_data['Date'].dt.month == month_num].sort_values('Date')
+                
+                if not month_data.empty:
+                    fig.add_trace(go.Scatter(
+                        x=month_data['Date'].dt.day,
+                        y=month_data['ADR'],
+                        mode='lines',
+                        name=f'{year}',
+                        line=dict(width=2)
+                    ))
+        
+        # Add 2025 data as bars
+        current_data = db.get_occupancy_data()
+        if not current_data.empty:
+            current_data['Date'] = pd.to_datetime(current_data['Date'])
+            month_2025 = current_data[(current_data['Date'].dt.year == 2025) & 
+                                    (current_data['Date'].dt.month == month_num)].sort_values('Date')
+            
+            if not month_2025.empty:
+                fig.add_trace(go.Bar(
+                    x=month_2025['Date'].dt.day,
+                    y=month_2025['ADR'],
+                    name='2025',
+                    opacity=0.7,
+                    marker_color='gold'
+                ))
+        
+        fig.update_layout(
+            title=f"{selected_month} ADR Comparison",
+            xaxis_title="Day of Month",
+            yaxis_title="ADR (AED)",
+            hovermode='x unified',
+            height=400,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying monthly ADR comparison: {str(e)}")
+
+def prepare_forecast_data():
+    """Prepare and combine all historical data for forecasting, store in SQL"""
+    try:
+        db = get_database()
+        
+        # Check if combined data already exists
+        combined_data = db.get_combined_forecast_data()
+        if not combined_data.empty:
+            st.session_state.forecast_data = combined_data
+            return True
+        
+        # Combine all historical data
+        all_data = []
+        
+        # Historical data (2022-2024)
+        for year in [2022, 2023, 2024]:
+            historical_data = db.get_historical_occupancy_data(f"historical_occupancy_{year}")
+            if not historical_data.empty:
+                historical_data['Date'] = pd.to_datetime(historical_data['Date'])
+                all_data.append(historical_data[['Date', 'Rm Sold', 'Revenue', 'ADR', 'RevPar']])
+        
+        # Current year data (2025)
+        current_data = db.get_occupancy_data()
+        if not current_data.empty:
+            current_data['Date'] = pd.to_datetime(current_data['Date'])
+            current_2025 = current_data[current_data['Date'].dt.year == 2025]
+            if not current_2025.empty:
+                # Rename column to match historical data
+                current_2025 = current_2025.rename(columns={'Rm_Sold': 'Rm Sold'})
+                all_data.append(current_2025[['Date', 'Rm Sold', 'Revenue', 'ADR', 'RevPar']])
+        
+        if not all_data:
+            return False
+        
+        # Combine all data
+        combined_data = pd.concat(all_data, ignore_index=True)
+        combined_data = combined_data.sort_values('Date').reset_index(drop=True)
+        
+        # Fill missing dates
+        date_range = pd.date_range(start=combined_data['Date'].min(), 
+                                 end=combined_data['Date'].max(), 
+                                 freq='D')
+        full_df = pd.DataFrame({'Date': date_range})
+        combined_data = full_df.merge(combined_data, on='Date', how='left')
+        
+        # Forward fill missing values
+        for col in ['Rm Sold', 'Revenue', 'ADR', 'RevPar']:
+            combined_data[col] = combined_data[col].fillna(method='ffill')
+        
+        # Calculate occupancy percentage
+        combined_data['Occupancy_Pct'] = (combined_data['Rm Sold'] / 339) * 100
+        
+        # Add calendar features for analysis
+        combined_data['Year'] = combined_data['Date'].dt.year
+        combined_data['Month'] = combined_data['Date'].dt.month
+        combined_data['DayOfWeek'] = combined_data['Date'].dt.dayofweek
+        combined_data['DayOfYear'] = combined_data['Date'].dt.dayofyear
+        combined_data['Quarter'] = combined_data['Date'].dt.quarter
+        
+        # Save to SQL for future use
+        db.save_combined_forecast_data(combined_data)
+        
+        # Store in session state
+        st.session_state.forecast_data = combined_data
+        return True
+        
+    except Exception as e:
+        st.error(f"Error preparing forecast data: {str(e)}")
+        return False
+
+def generate_all_forecasts():
+    """Generate forecasts for all horizons using appropriate models"""
+    try:
+        if 'forecast_data' not in st.session_state:
+            st.error("Forecast data not prepared")
+            return
+        
+        data = st.session_state.forecast_data.copy()
+        
+        # Prepare data for forecasting
+        data.set_index('Date', inplace=True)
+        
+        # Get current date
+        current_date = datetime.now()
+        
+        # Generate forecasts for recommended horizons
+        forecasts = {}
+        
+        # 90-day operational forecast (SARIMA/Prophet with occupancy regressors)
+        forecasts['90_day'] = generate_operational_forecast(data, current_date, 90)
+        
+        # 12-month strategic forecast (Seasonal decomposition/ensemble)
+        forecasts['12_month'] = generate_strategic_forecast(data, current_date, 365)
+        
+        # Store forecasts
+        st.session_state.forecasts = forecasts
+        
+        st.success("✅ All forecasts generated successfully!")
+        
+    except Exception as e:
+        st.error(f"Error generating forecasts: {str(e)}")
+
+def display_forecast_results():
+    """Display forecast results in KPI cards and charts"""
+    if 'forecasts' not in st.session_state:
+        st.info("No forecasts available. Click 'Generate Forecasts' to create predictions.")
         return
     
-    # Create tabs for different analysis types
-    hist_tab1, hist_tab2, hist_tab3, hist_tab4 = st.tabs([
-        "📊 Historical Analysis", 
-        "🔮 Time Series Forecast", 
-        "🎯 Multi-Horizon Predictions",
-        "📈 Trend Analysis"
-    ])
+    forecasts = st.session_state.forecasts
     
-    with hist_tab1:
-        st.subheader("📊 Historical Data Analysis (2022-2025)")
+    # Display KPI cards
+    st.subheader("🎯 Forecast KPIs")
+    
+    col1, col2 = st.columns(2)
+    
+    # 90-day Operational KPI
+    if forecasts.get('90_day'):
+        forecast_90d = forecasts['90_day']
+        with col1:
+            st.metric(
+                label="📅 90-Day Operational Forecast",
+                value=f"AED {forecast_90d['revenue_total']:,.0f}",
+                delta=f"Model: {forecast_90d['model']}"
+            )
+            st.metric(
+                label="Average ADR",
+                value=f"AED {forecast_90d['avg_adr']:.0f}"
+            )
+            st.metric(
+                label="Average Occupancy",
+                value=f"{forecast_90d['avg_occupancy']:.1f}%"
+            )
+    
+    # 12-month Strategic KPI
+    if forecasts.get('12_month'):
+        forecast_12m = forecasts['12_month']
+        with col2:
+            st.metric(
+                label="📅 12-Month Strategic Forecast",
+                value=f"AED {forecast_12m['revenue_total']:,.0f}",
+                delta=f"Model: {forecast_12m['model']}"
+            )
+            st.metric(
+                label="Average ADR",
+                value=f"AED {forecast_12m['avg_adr']:.0f}"
+            )
+            st.metric(
+                label="Average Occupancy",
+                value=f"{forecast_12m['avg_occupancy']:.1f}%"
+            )
+    
+    st.divider()
+    
+    # Display forecast charts
+    st.subheader("📈 Forecast Visualization")
+    
+    display_forecast_charts(forecasts)
+
+def generate_operational_forecast(data, current_date, days):
+    """Generate 3-month forecast using SARIMA or Prophet"""
+    try:
+        # Use Revenue for forecasting
+        revenue_series = data['Revenue'].dropna()
         
-        try:
-            # Initialize data integrator
-            integrator = HotelDataIntegrator()
+        if PROPHET_AVAILABLE:
+            # Use Prophet for short-term forecasting
+            df_prophet = pd.DataFrame({
+                'ds': revenue_series.index,
+                'y': revenue_series.values
+            })
             
-            # Process and display historical data
-            if st.button("🔄 Load Historical Data", type="primary"):
-                with st.spinner("Loading and processing historical data..."):
-                    try:
-                        # Combine all years of data
-                        integrator.combine_all_years()
-                        combined_data = integrator.get_combined_data()
-                        
-                        if not combined_data.empty:
-                            st.success("✅ Historical data loaded successfully!")
-                            
-                            # Display data summary
-                            col1, col2, col3, col4 = st.columns(4)
-                            
-                            with col1:
-                                st.metric("Total Records", f"{len(combined_data):,}")
-                            with col2:
-                                date_range = f"{combined_data['Date'].min().strftime('%Y-%m')} to {combined_data['Date'].max().strftime('%Y-%m')}"
-                                st.metric("Date Range", date_range)
-                            with col3:
-                                avg_occupancy = combined_data['Occupancy'].mean()
-                                st.metric("Avg Occupancy", f"{avg_occupancy:.1f}%")
-                            with col4:
-                                avg_adr = combined_data['ADR'].mean()
-                                st.metric("Avg ADR", f"AED {avg_adr:.0f}")
-                            
-                            # Historical trends chart
-                            st.subheader("📈 Historical Occupancy & ADR Trends")
-                            
-                            # Create dual-axis chart
-                            fig_hist = make_subplots(specs=[[{"secondary_y": True}]])
-                            
-                            # Add occupancy line
-                            fig_hist.add_trace(
-                                go.Scatter(
-                                    x=combined_data['Date'],
-                                    y=combined_data['Occupancy'],
-                                    mode='lines',
-                                    name='Occupancy %',
-                                    line=dict(color='blue', width=2)
-                                ),
-                                secondary_y=False,
-                            )
-                            
-                            # Add ADR line
-                            fig_hist.add_trace(
-                                go.Scatter(
-                                    x=combined_data['Date'],
-                                    y=combined_data['ADR'],
-                                    mode='lines',
-                                    name='ADR (AED)',
-                                    line=dict(color='red', width=2)
-                                ),
-                                secondary_y=True,
-                            )
-                            
-                            # Update axes
-                            fig_hist.update_xaxes(title_text="Date")
-                            fig_hist.update_yaxes(title_text="Occupancy (%)", secondary_y=False)
-                            fig_hist.update_yaxes(title_text="ADR (AED)", secondary_y=True)
-                            fig_hist.update_layout(
-                                title="Historical Occupancy & ADR Trends (2022-2025)",
-                                height=500
-                            )
-                            
-                            st.plotly_chart(fig_hist, use_container_width=True)
-                            
-                            # Monthly analysis
-                            st.subheader("📅 Monthly Performance Analysis")
-                            
-                            # Group by month for seasonal analysis
-                            combined_data['Month'] = combined_data['Date'].dt.month
-                            combined_data['Year'] = combined_data['Date'].dt.year
-                            monthly_stats = combined_data.groupby('Month').agg({
-                                'Occupancy': ['mean', 'std'],
-                                'ADR': ['mean', 'std']
-                            }).round(2)
-                            
-                            # Display monthly statistics
-                            st.dataframe(monthly_stats, use_container_width=True)
-                            
-                        else:
-                            st.error("❌ No historical data found")
-                            
-                    except Exception as e:
-                        st.error(f"Error loading historical data: {str(e)}")
-                        st.exception(e)
-        
-        except Exception as e:
-            st.error(f"Error initializing data integrator: {str(e)}")
-    
-    with hist_tab2:
-        st.subheader("🔮 Corrected Time Series Forecasting")
-        st.info("Advanced time series forecasting with seasonal patterns and historical validation")
-        
-        try:
-            # Initialize corrected forecasting
-            forecaster = CorrectedHotelForecasting()
+            model = Prophet(
+                yearly_seasonality=True,
+                weekly_seasonality=True,
+                daily_seasonality=False,
+                changepoint_prior_scale=0.05
+            )
             
-            # Forecasting options
-            col1, col2 = st.columns(2)
-            with col1:
-                forecast_months = st.selectbox("Forecast Period", [3, 6, 12], index=0)
-            with col2:
-                model_type = st.selectbox("Model Type", ["ARIMA", "SARIMA", "Prophet", "Exponential Smoothing"], index=1)
+            model.fit(df_prophet)
             
-            if st.button("🚀 Generate Forecast", type="primary"):
-                with st.spinner(f"Generating {forecast_months}-month forecast using {model_type}..."):
-                    try:
-                        # Prepare data
-                        integrator = HotelDataIntegrator()
-                        integrator.combine_all_years()
-                        combined_data = integrator.get_combined_data()
-                        
-                        if not combined_data.empty:
-                            # Generate forecast
-                            forecast_results = forecaster.generate_multi_horizon_forecast(
-                                combined_data, 
-                                horizons=[forecast_months],
-                                model_type=model_type.lower().replace(" ", "_")
-                            )
-                            
-                            if forecast_results:
-                                st.success(f"✅ {forecast_months}-month forecast generated successfully!")
-                                
-                                # Display forecast results
-                                for horizon, results in forecast_results.items():
-                                    st.subheader(f"📊 {horizon}-Month Forecast Results")
-                                    
-                                    # Metrics
-                                    col1, col2, col3 = st.columns(3)
-                                    with col1:
-                                        avg_forecast = results['forecast'].mean()
-                                        st.metric("Avg Forecast Occupancy", f"{avg_forecast:.1f}%")
-                                    with col2:
-                                        if 'confidence_interval' in results:
-                                            ci_range = results['confidence_interval']['upper'].mean() - results['confidence_interval']['lower'].mean()
-                                            st.metric("Confidence Range", f"±{ci_range:.1f}%")
-                                    with col3:
-                                        if 'model_performance' in results:
-                                            mae = results['model_performance'].get('mae', 0)
-                                            st.metric("Model MAE", f"{mae:.2f}")
-                                    
-                                    # Forecast chart
-                                    fig_forecast = go.Figure()
-                                    
-                                    # Historical data (last 12 months)
-                                    recent_data = combined_data.tail(365)  # Last year
-                                    fig_forecast.add_trace(go.Scatter(
-                                        x=recent_data['Date'],
-                                        y=recent_data['Occupancy'],
-                                        mode='lines',
-                                        name='Historical',
-                                        line=dict(color='blue')
-                                    ))
-                                    
-                                    # Forecast
-                                    fig_forecast.add_trace(go.Scatter(
-                                        x=results['dates'],
-                                        y=results['forecast'],
-                                        mode='lines+markers',
-                                        name='Forecast',
-                                        line=dict(color='red', dash='dash')
-                                    ))
-                                    
-                                    # Confidence interval
-                                    if 'confidence_interval' in results:
-                                        fig_forecast.add_trace(go.Scatter(
-                                            x=results['dates'],
-                                            y=results['confidence_interval']['upper'],
-                                            mode='lines',
-                                            line=dict(width=0),
-                                            showlegend=False
-                                        ))
-                                        fig_forecast.add_trace(go.Scatter(
-                                            x=results['dates'],
-                                            y=results['confidence_interval']['lower'],
-                                            fill='tonexty',
-                                            mode='lines',
-                                            line=dict(width=0),
-                                            name='Confidence Interval',
-                                            fillcolor='rgba(255,0,0,0.2)'
-                                        ))
-                                    
-                                    fig_forecast.update_layout(
-                                        title=f"{horizon}-Month Occupancy Forecast ({model_type})",
-                                        xaxis_title="Date",
-                                        yaxis_title="Occupancy (%)",
-                                        height=500
-                                    )
-                                    
-                                    st.plotly_chart(fig_forecast, use_container_width=True)
-                                    
-                                    # Forecast table
-                                    forecast_df = pd.DataFrame({
-                                        'Date': results['dates'],
-                                        'Forecast_Occupancy': results['forecast'].round(1)
-                                    })
-                                    st.dataframe(forecast_df, use_container_width=True)
-                            
-                            else:
-                                st.error("❌ Failed to generate forecast")
-                        else:
-                            st.error("❌ No data available for forecasting")
-                            
-                    except Exception as e:
-                        st.error(f"Error generating forecast: {str(e)}")
-                        st.exception(e)
+            # Create future dates
+            future = model.make_future_dataframe(periods=days)
+            forecast = model.predict(future)
+            
+            # Extract forecast for the requested period
+            forecast_period = forecast.tail(days)
+            
+            return {
+                'model': 'Prophet',
+                'forecast': forecast_period['yhat'].values,
+                'lower': forecast_period['yhat_lower'].values,
+                'upper': forecast_period['yhat_upper'].values,
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': forecast_period['yhat'].sum(),
+                'avg_adr': data['ADR'].tail(30).mean(),  # Use recent average
+                'avg_occupancy': data['Occupancy_Pct'].tail(30).mean()
+            }
         
-        except Exception as e:
-            st.error(f"Error initializing forecaster: {str(e)}")
-    
-    with hist_tab3:
-        st.subheader("🎯 Multi-Horizon Predictions")
-        st.info("Compare 3, 6, and 12-month forecasts with different models")
+        elif TS_AVAILABLE:
+            # Use SARIMA as fallback
+            model = SARIMAX(revenue_series, order=(1,1,1), seasonal_order=(1,1,1,12))
+            fitted_model = model.fit(disp=False)
+            
+            forecast = fitted_model.forecast(steps=days)
+            conf_int = fitted_model.get_forecast(steps=days).conf_int()
+            
+            return {
+                'model': 'SARIMA',
+                'forecast': forecast.values,
+                'lower': conf_int.iloc[:, 0].values,
+                'upper': conf_int.iloc[:, 1].values,
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': forecast.sum(),
+                'avg_adr': data['ADR'].tail(30).mean(),
+                'avg_occupancy': data['Occupancy_Pct'].tail(30).mean()
+            }
         
-        if st.button("🔄 Generate Multi-Horizon Forecasts", type="primary"):
-            with st.spinner("Generating multi-horizon forecasts..."):
-                try:
-                    # Initialize models
-                    integrator = HotelDataIntegrator()
-                    forecaster = CorrectedHotelForecasting()
-                    
-                    # Prepare data
-                    integrator.combine_all_years()
-                    combined_data = integrator.get_combined_data()
-                    
-                    if not combined_data.empty:
-                        # Generate forecasts for all horizons
-                        horizons = [3, 6, 12]
-                        all_results = {}
-                        
-                        for horizon in horizons:
-                            results = forecaster.generate_multi_horizon_forecast(
-                                combined_data,
-                                horizons=[horizon],
-                                model_type="sarima"
-                            )
-                            if results:
-                                all_results[horizon] = results[horizon]
-                        
-                        if all_results:
-                            st.success("✅ Multi-horizon forecasts generated!")
-                            
-                            # Comparison metrics
-                            st.subheader("📊 Forecast Comparison")
-                            
-                            col1, col2, col3 = st.columns(3)
-                            for i, (horizon, results) in enumerate(all_results.items()):
-                                with [col1, col2, col3][i]:
-                                    avg_forecast = results['forecast'].mean()
-                                    st.metric(f"{horizon}-Month Avg", f"{avg_forecast:.1f}%")
-                            
-                            # Combined forecast chart
-                            fig_multi = go.Figure()
-                            
-                            # Historical data
-                            recent_data = combined_data.tail(180)  # Last 6 months
-                            fig_multi.add_trace(go.Scatter(
-                                x=recent_data['Date'],
-                                y=recent_data['Occupancy'],
-                                mode='lines',
-                                name='Historical',
-                                line=dict(color='blue', width=3)
-                            ))
-                            
-                            # Add all forecasts
-                            colors = ['red', 'green', 'orange']
-                            for i, (horizon, results) in enumerate(all_results.items()):
-                                fig_multi.add_trace(go.Scatter(
-                                    x=results['dates'],
-                                    y=results['forecast'],
-                                    mode='lines+markers',
-                                    name=f'{horizon}-Month Forecast',
-                                    line=dict(color=colors[i], dash='dash')
-                                ))
-                            
-                            fig_multi.update_layout(
-                                title="Multi-Horizon Occupancy Forecasts Comparison",
-                                xaxis_title="Date",
-                                yaxis_title="Occupancy (%)",
-                                height=600
-                            )
-                            
-                            st.plotly_chart(fig_multi, use_container_width=True)
-                            
-                            # Detailed results table
-                            st.subheader("📋 Detailed Forecast Results")
-                            
-                            # Create comparison table
-                            comparison_data = []
-                            for horizon, results in all_results.items():
-                                for i, (date, forecast) in enumerate(zip(results['dates'], results['forecast'])):
-                                    comparison_data.append({
-                                        'Horizon': f'{horizon}-Month',
-                                        'Date': date,
-                                        'Forecast_Occupancy': round(forecast, 1)
-                                    })
-                            
-                            comparison_df = pd.DataFrame(comparison_data)
-                            st.dataframe(comparison_df, use_container_width=True)
-                        
-                        else:
-                            st.error("❌ Failed to generate multi-horizon forecasts")
-                    else:
-                        st.error("❌ No data available for forecasting")
-                        
-                except Exception as e:
-                    st.error(f"Error generating multi-horizon forecasts: {str(e)}")
-                    st.exception(e)
-    
-    with hist_tab4:
-        st.subheader("📈 Advanced Trend Analysis")
-        st.info("Seasonal decomposition and trend analysis with corrected patterns")
+        else:
+            # Simple seasonal naive forecast
+            seasonal_avg = revenue_series.tail(365).mean()
+            forecast_values = [seasonal_avg] * days
+            
+            return {
+                'model': 'Seasonal Naive',
+                'forecast': forecast_values,
+                'lower': [v * 0.8 for v in forecast_values],
+                'upper': [v * 1.2 for v in forecast_values],
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': sum(forecast_values),
+                'avg_adr': data['ADR'].tail(30).mean(),
+                'avg_occupancy': data['Occupancy_Pct'].tail(30).mean()
+            }
+            
+    except Exception as e:
+        st.error(f"Error in short-term forecast: {str(e)}")
+        return None
+
+def generate_strategic_forecast(data, current_date, days):
+    """Generate 12-month forecast using ensemble methods"""
+    try:
+        # For long-term, use simpler but more robust approaches
+        revenue_series = data['Revenue'].dropna()
         
-        if st.button("🔍 Analyze Trends", type="primary"):
-            with st.spinner("Analyzing trends and seasonal patterns..."):
-                try:
-                    # Initialize data integrator
-                    integrator = HotelDataIntegrator()
-                    integrator.combine_all_years()
-                    combined_data = integrator.get_combined_data()
-                    
-                    if not combined_data.empty:
-                        # Prepare time series data
-                        ts_data = combined_data.set_index('Date')['Occupancy'].resample('D').mean()
-                        
-                        # Seasonal decomposition
-                        if len(ts_data) > 365:  # Need at least 1 year of data
-                            decomposition = seasonal_decompose(ts_data, model='additive', period=365)
-                            
-                            # Plot decomposition
-                            fig_decomp = make_subplots(
-                                rows=4, cols=1,
-                                subplot_titles=['Original', 'Trend', 'Seasonal', 'Residual'],
-                                vertical_spacing=0.08
-                            )
-                            
-                            # Original
-                            fig_decomp.add_trace(
-                                go.Scatter(x=decomposition.observed.index, y=decomposition.observed.values,
-                                          mode='lines', name='Original', line=dict(color='blue')),
-                                row=1, col=1
-                            )
-                            
-                            # Trend
-                            fig_decomp.add_trace(
-                                go.Scatter(x=decomposition.trend.index, y=decomposition.trend.values,
-                                          mode='lines', name='Trend', line=dict(color='red')),
-                                row=2, col=1
-                            )
-                            
-                            # Seasonal
-                            fig_decomp.add_trace(
-                                go.Scatter(x=decomposition.seasonal.index, y=decomposition.seasonal.values,
-                                          mode='lines', name='Seasonal', line=dict(color='green')),
-                                row=3, col=1
-                            )
-                            
-                            # Residual
-                            fig_decomp.add_trace(
-                                go.Scatter(x=decomposition.resid.index, y=decomposition.resid.values,
-                                          mode='lines', name='Residual', line=dict(color='orange')),
-                                row=4, col=1
-                            )
-                            
-                            fig_decomp.update_layout(
-                                height=800,
-                                title="Seasonal Decomposition of Occupancy Data",
-                                showlegend=False
-                            )
-                            
-                            st.plotly_chart(fig_decomp, use_container_width=True)
-                            
-                            # Trend statistics
-                            st.subheader("📊 Trend Statistics")
-                            
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                trend_slope = np.polyfit(range(len(decomposition.trend.dropna())), decomposition.trend.dropna(), 1)[0]
-                                st.metric("Trend Slope", f"{trend_slope:.4f}")
-                            with col2:
-                                seasonal_strength = decomposition.seasonal.std()
-                                st.metric("Seasonal Variation", f"{seasonal_strength:.2f}%")
-                            with col3:
-                                residual_std = decomposition.resid.std()
-                                st.metric("Residual Std", f"{residual_std:.2f}%")
-                            with col4:
-                                explained_var = 1 - (decomposition.resid.var() / decomposition.observed.var())
-                                st.metric("Explained Variance", f"{explained_var:.1%}")
-                            
-                            st.success("✅ Trend analysis completed!")
-                        
-                        else:
-                            st.warning("⚠️ Need at least 1 year of data for seasonal decomposition")
-                    
-                    else:
-                        st.error("❌ No data available for trend analysis")
-                        
-                except Exception as e:
-                    st.error(f"Error in trend analysis: {str(e)}")
-                    st.exception(e)
+        # Seasonal decomposition
+        if len(revenue_series) >= 365*2:  # Need at least 2 years
+            decomposition = seasonal_decompose(revenue_series, model='additive', period=365)
+            trend = decomposition.trend.dropna()
+            seasonal = decomposition.seasonal.dropna()
+            
+            # Project trend
+            trend_slope = (trend.tail(30).mean() - trend.head(30).mean()) / len(trend)
+            
+            # Generate forecast
+            forecast_values = []
+            for i in range(days):
+                future_date = current_date + timedelta(days=i)
+                day_of_year = future_date.timetuple().tm_yday
+                
+                # Get seasonal component (cycle through year)
+                seasonal_idx = (day_of_year - 1) % len(seasonal)
+                seasonal_component = seasonal.iloc[seasonal_idx]
+                
+                # Project trend
+                trend_component = trend.iloc[-1] + (trend_slope * (i + 1))
+                
+                forecast_value = trend_component + seasonal_component
+                forecast_values.append(max(0, forecast_value))  # Ensure non-negative
+            
+            return {
+                'model': 'Seasonal Decomposition',
+                'forecast': forecast_values,
+                'lower': [v * 0.75 for v in forecast_values],
+                'upper': [v * 1.25 for v in forecast_values],
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': sum(forecast_values),
+                'avg_adr': data['ADR'].tail(90).mean(),
+                'avg_occupancy': data['Occupancy_Pct'].tail(90).mean()
+            }
+        
+        else:
+            # Simple trend projection
+            recent_avg = revenue_series.tail(90).mean()
+            yearly_growth = 0.05  # Assume 5% growth
+            
+            forecast_values = []
+            for i in range(days):
+                growth_factor = (1 + yearly_growth) ** (i / 365)
+                forecast_value = recent_avg * growth_factor
+                forecast_values.append(forecast_value)
+            
+            return {
+                'model': 'Trend Projection',
+                'forecast': forecast_values,
+                'lower': [v * 0.7 for v in forecast_values],
+                'upper': [v * 1.3 for v in forecast_values],
+                'dates': pd.date_range(start=current_date, periods=days, freq='D'),
+                'revenue_total': sum(forecast_values),
+                'avg_adr': data['ADR'].tail(90).mean(),
+                'avg_occupancy': data['Occupancy_Pct'].tail(90).mean()
+            }
+            
+    except Exception as e:
+        st.error(f"Error in strategic forecast: {str(e)}")
+        return generate_operational_forecast(data, current_date, days)
+
+def display_forecast_charts(forecasts):
+    """Display interactive forecast charts"""
+    try:
+        fig = go.Figure()
+        
+        # Historical data
+        if 'forecast_data' in st.session_state:
+            historical = st.session_state.forecast_data.copy()
+            historical['Date'] = pd.to_datetime(historical['Date'])
+            historical = historical.set_index('Date')
+            
+            # Show last 2 years of historical data
+            cutoff_date = datetime.now() - timedelta(days=730)
+            recent_historical = historical[historical.index >= cutoff_date]
+            
+            fig.add_trace(go.Scatter(
+                x=recent_historical.index,
+                y=recent_historical['Revenue'],
+                mode='lines',
+                name='Historical Revenue',
+                line=dict(color='blue', width=2)
+            ))
+        
+        # Add forecast lines
+        colors = ['#FF8C00', '#8A2BE2']  # Orange, Purple in hex
+        names = ['90-Day Operational', '12-Month Strategic']
+        
+        for i, (key, color, name) in enumerate(zip(['90_day', '12_month'], colors, names)):
+            if forecasts.get(key):
+                forecast = forecasts[key]
+                
+                # Main forecast line
+                fig.add_trace(go.Scatter(
+                    x=forecast['dates'],
+                    y=forecast['forecast'],
+                    mode='lines',
+                    name=f'{name} Forecast',
+                    line=dict(color=color, width=2, dash='dash')
+                ))
+                
+                # Convert hex to rgba for confidence intervals
+                if color == '#FF8C00':  # Orange
+                    rgba_color = 'rgba(255, 140, 0, 0.1)'
+                else:  # Purple
+                    rgba_color = 'rgba(138, 43, 226, 0.1)'
+                
+                # Confidence intervals
+                fig.add_trace(go.Scatter(
+                    x=list(forecast['dates']) + list(forecast['dates'][::-1]),
+                    y=list(forecast['upper']) + list(forecast['lower'][::-1]),
+                    fill='tonexty' if i == 0 else 'toself',
+                    fillcolor=rgba_color,
+                    line=dict(color='rgba(255,255,255,0)'),
+                    name=f'{name} Confidence Interval',
+                    showlegend=False
+                ))
+        
+        fig.update_layout(
+            title="Revenue Forecasts with Confidence Intervals",
+            xaxis_title="Date",
+            yaxis_title="Revenue (AED)",
+            hovermode='x unified',
+            height=600,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Model information
+        st.subheader("🔍 Model Information")
+        
+        info_col1, info_col2 = st.columns(2)
+        
+        with info_col1:
+            if forecasts.get('90_day'):
+                st.info(f"""
+                **90-Day Operational Forecast**
+                - Model: {forecasts['90_day']['model']}
+                - Best for: Daily/weekly operations
+                - Accuracy: High (recent patterns)
+                - Use case: Rate decisions, yield management, staffing
+                - Update frequency: Daily/weekly rolling
+                """)
+        
+        with info_col2:
+            if forecasts.get('12_month'):
+                st.info(f"""
+                **12-Month Strategic Forecast**
+                - Model: {forecasts['12_month']['model']}
+                - Best for: Annual planning
+                - Accuracy: Lower (wider intervals)
+                - Use case: Budgets, capital planning, scenarios
+                - Update frequency: Monthly refresh
+                """)
+        
+    except Exception as e:
+        st.error(f"Error displaying forecast charts: {str(e)}")
 
 def enhanced_forecasting_tab():
     """Enhanced Forecasting Tab with 3-month weighted forecasts and year-end predictions"""
