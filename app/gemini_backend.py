@@ -15,7 +15,7 @@ import traceback
 class GeminiSQLBackend:
     """Backend class for Gemini AI SQL query generation"""
     
-    def __init__(self, api_key: str, db_path: str = "revenue_data.db"):
+    def __init__(self, api_key: str, db_path: str = "db/revenue.db"):
         """
         Initialize the Gemini backend
         
@@ -150,20 +150,35 @@ class GeminiSQLBackend:
             
             # Create prompt
             prompt = f"""
-You are a SQL expert. Given the following database schema and a natural language question, 
+You are a SQL expert for a hotel revenue analytics database. Given the following database schema and a natural language question, 
 generate a SQL SELECT query that answers the question.
 
 {schema}
+
+IMPORTANT CONTEXT:
+- This is hotel revenue data with occupancy, room sales, ADR (Average Daily Rate), RevPAR (Revenue Per Available Room)
+- Main tables for daily data: occupancy_analysis, hotel_data_combined, historical_occupancy_YYYY
+- Segment data: segment_analysis, historical_segment_YYYY 
+- Reservations: entered_on (reservations entered), arrivals (guest arrivals)
+- Block business: block_analysis
+- Dates are in various formats: 'YYYY-MM-DD', timestamps, or text
+- Revenue columns include: Revenue, Daily_Revenue, Business_on_the_Books_Revenue
+- Room columns include: Rm_Sold, Rooms_Sold, Business_on_the_Books_Rooms
+- ADR columns include: ADR, Business_on_the_Books_ADR
 
 Rules:
 1. Only generate SELECT queries
 2. Do not use DELETE, UPDATE, INSERT, DROP, or other modifying statements
 3. Use proper SQL syntax for SQLite
 4. Return only the SQL query, no explanations
-5. Use appropriate table and column names from the schema
-6. Handle dates appropriately for time-based queries
+5. Use appropriate table and column names from the schema above
+6. For date queries, use appropriate date functions like strftime() for SQLite
 7. Use aggregations (SUM, COUNT, AVG) when appropriate
 8. Use proper WHERE clauses for filtering
+9. When asking about "last month" or recent periods, use recent dates from the data
+10. For revenue totals, use SUM() on revenue columns
+11. For occupancy, use occupancy_analysis or hotel_data_combined tables
+12. For segment analysis, use segment_analysis or historical_segment_YYYY tables
 
 Question: {question}
 
@@ -238,7 +253,7 @@ SQL Query:
             return result
 
 
-def create_gemini_backend(api_key: str, db_path: str = "revenue_data.db") -> GeminiSQLBackend:
+def create_gemini_backend(api_key: str, db_path: str = "db/revenue.db") -> GeminiSQLBackend:
     """
     Factory function to create Gemini backend instance
     
