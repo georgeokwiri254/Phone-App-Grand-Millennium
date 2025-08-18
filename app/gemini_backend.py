@@ -30,7 +30,7 @@ class GeminiSQLBackend:
         # Configure Gemini
         try:
             genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-pro')
+            self.model = genai.GenerativeModel('gemini-1.5-flash')
             self.connected = True
         except Exception as e:
             self.connected = False
