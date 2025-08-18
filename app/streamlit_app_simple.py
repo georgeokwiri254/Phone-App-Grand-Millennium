@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import re
 import os
 import sys
 import base64
@@ -146,6 +147,43 @@ if 'segment_data' not in st.session_state:
     st.session_state.segment_data = None
 if 'occupancy_data' not in st.session_state:
     st.session_state.occupancy_data = None
+if 'pickup_report_date' not in st.session_state:
+    st.session_state.pickup_report_date = None
+
+def extract_pickup_report_date(filename):
+    """
+    Extract pickup report date from filename
+    Expected format: MHR Pick Up Report 2025 - 15.08.25
+    """
+    try:
+        # Pattern to match date in format DD.MM.YY or similar
+        date_patterns = [
+            r'(\d{1,2})\.(\d{1,2})\.(\d{2,4})',  # DD.MM.YY or DD.MM.YYYY
+            r'(\d{1,2})-(\d{1,2})-(\d{2,4})',   # DD-MM-YY or DD-MM-YYYY
+            r'(\d{1,2})_(\d{1,2})_(\d{2,4})',   # DD_MM_YY or DD_MM_YYYY
+        ]
+        
+        for pattern in date_patterns:
+            match = re.search(pattern, filename)
+            if match:
+                day, month, year = match.groups()
+                
+                # Handle 2-digit years
+                if len(year) == 2:
+                    year = '20' + year if int(year) < 50 else '19' + year
+                
+                # Format as DD/MM/YY
+                formatted_date = f"{day.zfill(2)}/{month.zfill(2)}/{year[-2:]}"
+                return formatted_date
+                
+        return None
+    except Exception as e:
+        return None
+
+def display_pickup_report_header():
+    """Display the pickup report header with extracted date"""
+    # Header removed - date only shown in navigation panel
+    pass
 if 'last_run_timestamp' not in st.session_state:
     st.session_state.last_run_timestamp = None
 if 'current_tab' not in st.session_state:
@@ -396,10 +434,24 @@ def dashboard_tab():
         with open(temp_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
         file_to_process = temp_path
-        st.success(f"✅ Uploaded: {uploaded_file.name}")
+        
+        # Extract and store pickup report date
+        extracted_date = extract_pickup_report_date(uploaded_file.name)
+        if extracted_date:
+            st.session_state.pickup_report_date = extracted_date
+            st.success(f"✅ Uploaded: {uploaded_file.name} (Report Date: {extracted_date})")
+        else:
+            st.success(f"✅ Uploaded: {uploaded_file.name}")
     elif selected_file:
         file_to_process = project_root / selected_file
-        st.success(f"✅ Selected: {selected_file}")
+        
+        # Extract and store pickup report date
+        extracted_date = extract_pickup_report_date(selected_file)
+        if extracted_date:
+            st.session_state.pickup_report_date = extracted_date
+            st.success(f"✅ Selected: {selected_file} (Report Date: {extracted_date})")
+        else:
+            st.success(f"✅ Selected: {selected_file}")
     
     # Auto-processing section
     st.subheader("3. Data Processing")
@@ -448,46 +500,76 @@ def show_dashboard_kpis():
     st.subheader("📊 Daily Pickup KPI Cards")
     
     try:
-        # Get segment data
-        if hasattr(st.session_state, 'segment_data') and st.session_state.segment_data is not None:
-            df = st.session_state.segment_data.copy()
+        # Get occupancy data for Daily Revenue (column D)
+        if hasattr(st.session_state, 'occupancy_data') and st.session_state.occupancy_data is not None:
+            df = st.session_state.occupancy_data.copy()
         else:
             if database_available:
                 db = get_database()
-                df = db.get_segment_data()
+                df = db.get_occupancy_data()
             else:
                 df = pd.DataFrame()  # Empty dataframe if no database
         
         if df.empty:
-            st.error("No segment data available for KPIs")
+            st.error("No occupancy data available for KPIs")
             return
         
-        # Get current month and next 2 months
+        # Get next 3 months (starting from current month)
         current_date = datetime.now()
         months_to_show = []
         
         for i in range(3):  # Current + next 2 months
-            if current_date.month + i > 12:
-                month_date = datetime(current_date.year + 1, (current_date.month + i) % 12, 1)
+            month_offset = i
+            if current_date.month + month_offset > 12:
+                year_offset = (current_date.month + month_offset - 1) // 12
+                month_num = ((current_date.month + month_offset - 1) % 12) + 1
+                month_date = datetime(current_date.year + year_offset, month_num, 1)
             else:
-                month_date = datetime(current_date.year, current_date.month + i, 1)
+                month_date = datetime(current_date.year, current_date.month + month_offset, 1)
             months_to_show.append(month_date)
         
         # Create 3 columns for the KPI cards
         col1, col2, col3 = st.columns(3)
         
+        # Show available columns to identify Column D
+        st.write("**Available columns in occupancy data:**")
+        column_list = list(df.columns)
+        for i, col in enumerate(column_list):
+            st.write(f"Column {chr(65+i)} ({i+1}): {col}")
+        
+        # Column D would be the 4th column (index 3)
+        if len(column_list) >= 4:
+            column_d = column_list[3]  # 4th column (index 3) = Column D
+            st.write(f"**Using Column D: {column_d}**")
+        else:
+            st.error("❌ Column D not found - not enough columns in occupancy data")
+            return
+        
         for i, month_date in enumerate(months_to_show):
-            month_str = month_date.strftime('%Y-%m-01')
             month_name = month_date.strftime('%B %Y')
             
-            # Get month data
-            month_data = df[df['Month'] == month_str]
+            # Get month data using Date column from occupancy data
+            month_data = pd.DataFrame()
             
-            if not month_data.empty:
-                daily_pickup = month_data['Daily_Pick_up_Revenue'].sum()
+            if not df.empty and 'Date' in df.columns:
+                # Convert Date column to datetime if it's not already
+                df_copy = df.copy()
+                try:
+                    df_copy['Date'] = pd.to_datetime(df_copy['Date'])
+                    
+                    # Filter by year and month
+                    month_mask = (df_copy['Date'].dt.year == month_date.year) & (df_copy['Date'].dt.month == month_date.month)
+                    month_data = df_copy[month_mask]
+                    
+                except Exception as e:
+                    st.error(f"Date conversion error for {month_name}: {e}")
+            
+            if not month_data.empty and column_d in month_data.columns:
+                # Sum of Column D for the month
+                column_d_total = month_data[column_d].sum()
                 
                 # Determine color based on positive/negative
-                if daily_pickup >= 0:
+                if column_d_total >= 0:
                     delta_color = "normal"  # Green
                     emoji = "✅"
                 else:
@@ -498,8 +580,8 @@ def show_dashboard_kpis():
                 with [col1, col2, col3][i]:
                     st.metric(
                         label=f"{emoji} {month_name}",
-                        value=f"AED {daily_pickup:,.0f}",
-                        delta=f"Daily Pickup",
+                        value=f"AED {column_d_total:,.0f}",
+                        delta=f"Column D Sum",
                         delta_color=delta_color
                     )
             else:
@@ -507,7 +589,7 @@ def show_dashboard_kpis():
                     st.metric(
                         label=f"❓ {month_name}",
                         value="No Data",
-                        delta="Daily Pickup"
+                        delta="Column D Sum"
                     )
                     
     except Exception as e:
@@ -615,19 +697,27 @@ def daily_occupancy_tab():
     if 'Date' in df.columns:
         df['Date'] = pd.to_datetime(df['Date'])
     
-    # Date range filter
+    # Date range filter - Single date range picker
     st.subheader("📅 Date Range Filter")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        start_date = st.date_input("Start Date", df['Date'].min().date() if 'Date' in df.columns else datetime.now().date())
-    with col2:
-        end_date = st.date_input("End Date", df['Date'].max().date() if 'Date' in df.columns else datetime.now().date())
-    
-    # Filter data
     if 'Date' in df.columns:
-        mask = (df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)
-        filtered_df = df[mask]
+        min_date = df['Date'].min().date()
+        max_date = df['Date'].max().date()
+        date_range = st.date_input(
+            "Select Date Range",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date,
+            help="Select the start and end dates for analysis"
+        )
+        
+        # Filter data based on date range
+        if len(date_range) == 2:
+            start_date, end_date = date_range
+            mask = (df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)
+            filtered_df = df[mask]
+        else:
+            # If only one date selected, use full range
+            filtered_df = df
     else:
         filtered_df = df
     
@@ -780,13 +870,13 @@ def daily_occupancy_tab():
                 
                 with col1:
                     st.metric(
-                        "Month-to-Date Revenue",
-                        f"AED {month_proj['current_month_revenue']:,.0f}"
+                        "Actual Revenue to Date (Confirmed)",
+                        f"AED {month_proj['actual_revenue_to_date']:,.0f}"
                     )
                 
                 with col2:
                     st.metric(
-                        "Remaining Forecast",
+                        "Remaining Forecast (Today-Month End)",
                         f"AED {month_proj['remaining_revenue_forecast']:,.0f}"
                     )
                 
@@ -850,6 +940,190 @@ def daily_occupancy_tab():
                 
     except Exception as e:
         st.error(f"❌ Forecast error: {str(e)}")
+    
+    # Daily Revenue Pickup Chart
+    st.subheader("💰 Daily Revenue Pickup per Day")
+    
+    try:
+        # Use the same occupancy data that's already loaded in this tab
+        occupancy_df = filtered_df.copy()  # Use the already filtered occupancy data
+        
+        if occupancy_df.empty:
+            st.info("No occupancy data available for revenue pickup chart")
+            return
+        
+        # Determine the revenue column name (could be 'Revenue', 'DailyRevenue', etc.)
+        revenue_column = None
+        if 'Revenue' in occupancy_df.columns:
+            revenue_column = 'Revenue'
+        elif 'DailyRevenue' in occupancy_df.columns:
+            revenue_column = 'DailyRevenue'
+        elif 'Daily_Revenue' in occupancy_df.columns:
+            revenue_column = 'Daily_Revenue'
+        
+        if revenue_column is None:
+            st.error("❌ Daily Revenue column not found in occupancy data")
+            st.write("Available columns:", list(occupancy_df.columns))
+            return
+        
+        if not occupancy_df.empty and revenue_column in occupancy_df.columns:
+            # Ensure Date column is datetime
+            if 'Date' in occupancy_df.columns:
+                occupancy_df['Date'] = pd.to_datetime(occupancy_df['Date'])
+                
+                # Sort by date to ensure proper trend line
+                occupancy_df = occupancy_df.sort_values('Date')
+                
+                # Create daily revenue pickup chart - TREND LINE
+                fig_pickup = go.Figure()
+                
+                # Add revenue pickup as trend line (smooth line)
+                fig_pickup.add_trace(go.Scatter(
+                    x=occupancy_df['Date'],
+                    y=occupancy_df[revenue_column],
+                    mode='lines+markers',
+                    name='Daily Revenue Trend',
+                    line=dict(color='green', width=3, shape='spline'),  # Smooth trend line
+                    marker=dict(size=4, color='darkgreen'),
+                    hovertemplate='<b>Date:</b> %{x}<br><b>Daily Revenue:</b> AED %{y:,.0f}<extra></extra>',
+                    fill='tonexty' if len(occupancy_df) > 1 else None,
+                    fillcolor='rgba(0,128,0,0.1)'
+                ))
+                
+                # Add trend line (moving average if enough data)
+                if len(occupancy_df) >= 7:
+                    occupancy_df['MA_7'] = occupancy_df[revenue_column].rolling(window=7, center=True).mean()
+                    fig_pickup.add_trace(go.Scatter(
+                        x=occupancy_df['Date'],
+                        y=occupancy_df['MA_7'],
+                        mode='lines',
+                        name='7-Day Moving Average',
+                        line=dict(color='orange', width=2, dash='dash'),
+                        hovertemplate='<b>Date:</b> %{x}<br><b>7-Day Avg:</b> AED %{y:,.0f}<extra></extra>'
+                    ))
+                
+                # Update layout
+                fig_pickup.update_layout(
+                    title="Daily Revenue Pickup Trend (Column D from Occupancy Data)",
+                    xaxis_title="Date",
+                    yaxis_title="Daily Revenue (AED)",
+                    height=500,
+                    hovermode='x unified',
+                    showlegend=True,
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    xaxis=dict(showgrid=True, gridcolor='lightgray'),
+                    yaxis=dict(showgrid=True, gridcolor='lightgray')
+                )
+                
+                st.plotly_chart(fig_pickup, use_container_width=True)
+                
+                # Summary statistics for pickup revenue
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    total_revenue = occupancy_df[revenue_column].sum()
+                    st.metric("Total Daily Revenue", f"AED {total_revenue:,.0f}")
+                with col2:
+                    avg_revenue = occupancy_df[revenue_column].mean()
+                    st.metric("Average Daily Revenue", f"AED {avg_revenue:,.0f}")
+                with col3:
+                    max_revenue = occupancy_df[revenue_column].max()
+                    max_date = occupancy_df.loc[occupancy_df[revenue_column].idxmax(), 'Date']
+                    st.metric("Highest Revenue Day", f"AED {max_revenue:,.0f}", 
+                             delta=f"{max_date.strftime('%Y-%m-%d')}")
+                with col4:
+                    positive_days = (occupancy_df[revenue_column] > 0).sum()
+                    st.metric("Positive Revenue Days", f"{positive_days} days")
+            else:
+                st.error("Date column not found in occupancy data")
+        else:
+            st.info("Daily revenue data not available")
+            
+    except Exception as e:
+        st.error(f"❌ Error creating daily revenue chart: {str(e)}")
+    
+    # Column D Trend Line Chart
+    st.subheader("📊 Column D Trend Analysis")
+    
+    try:
+        # Identify Column D from occupancy data
+        column_list = list(filtered_df.columns)
+        if len(column_list) >= 4:
+            column_d = column_list[3]  # 4th column (index 3) = Column D
+            st.write(f"**Showing trend for Column D: {column_d}**")
+            
+            if column_d in filtered_df.columns:
+                # Ensure Date column is datetime
+                df_for_chart = filtered_df.copy()
+                if 'Date' in df_for_chart.columns:
+                    df_for_chart['Date'] = pd.to_datetime(df_for_chart['Date'])
+                    df_for_chart = df_for_chart.sort_values('Date')
+                    
+                    # Create Column D trend chart
+                    fig_column_d = go.Figure()
+                    
+                    # Add Column D trend line
+                    fig_column_d.add_trace(go.Scatter(
+                        x=df_for_chart['Date'],
+                        y=df_for_chart[column_d],
+                        mode='lines+markers',
+                        name=f'{column_d} Trend',
+                        line=dict(color='purple', width=3),
+                        marker=dict(size=5, color='darkviolet'),
+                        hovertemplate=f'<b>Date:</b> %{{x}}<br><b>{column_d}:</b> %{{y:,.2f}}<extra></extra>'
+                    ))
+                    
+                    # Add moving average if enough data
+                    if len(df_for_chart) >= 7:
+                        df_for_chart['MA_7'] = df_for_chart[column_d].rolling(window=7, center=True).mean()
+                        fig_column_d.add_trace(go.Scatter(
+                            x=df_for_chart['Date'],
+                            y=df_for_chart['MA_7'],
+                            mode='lines',
+                            name='7-Day Moving Average',
+                            line=dict(color='orange', width=2, dash='dash'),
+                            hovertemplate=f'<b>Date:</b> %{{x}}<br><b>7-Day Avg:</b> %{{y:,.2f}}<extra></extra>'
+                        ))
+                    
+                    # Update layout
+                    fig_column_d.update_layout(
+                        title=f"Column D ({column_d}) Daily Trend Analysis",
+                        xaxis_title="Date",
+                        yaxis_title=f"{column_d}",
+                        height=500,
+                        hovermode='x unified',
+                        showlegend=True,
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis=dict(showgrid=True, gridcolor='lightgray'),
+                        yaxis=dict(showgrid=True, gridcolor='lightgray')
+                    )
+                    
+                    st.plotly_chart(fig_column_d, use_container_width=True)
+                    
+                    # Summary statistics for Column D
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        total_column_d = df_for_chart[column_d].sum()
+                        st.metric(f"Total {column_d}", f"{total_column_d:,.2f}")
+                    with col2:
+                        avg_column_d = df_for_chart[column_d].mean()
+                        st.metric(f"Average {column_d}", f"{avg_column_d:,.2f}")
+                    with col3:
+                        max_column_d = df_for_chart[column_d].max()
+                        max_date = df_for_chart.loc[df_for_chart[column_d].idxmax(), 'Date']
+                        st.metric(f"Highest {column_d}", f"{max_column_d:,.2f}", 
+                                 delta=f"{max_date.strftime('%Y-%m-%d')}")
+                    with col4:
+                        std_column_d = df_for_chart[column_d].std()
+                        st.metric(f"Std Deviation", f"{std_column_d:,.2f}")
+                else:
+                    st.error("Date column not found for Column D chart")
+            else:
+                st.error(f"Column D ({column_d}) not found in data")
+        else:
+            st.error("Not enough columns in data to identify Column D")
+            
+    except Exception as e:
+        st.error(f"❌ Error creating Column D trend chart: {str(e)}")
     
     # Data table
     st.subheader("📋 Occupancy Data Table")
@@ -1578,7 +1852,7 @@ def process_block_data_file(uploaded_file):
             app_logger.error(f"Block data processing error: {e}")
 
 def create_calendar_heatmap(block_data):
-    """Create a calendar-style heatmap showing companies vs dates with block sizes"""
+    """Create a calendar-style heatmap showing companies vs dates with block sizes and booking status"""
     try:
         if block_data.empty:
             st.info("No data available for heatmap")
@@ -1593,8 +1867,12 @@ def create_calendar_heatmap(block_data):
             fill_value=0
         )
         
-        # Limit to top 20 companies by total blocks for readability
-        company_totals = pivot_data.sum(axis=1).nlargest(20)
+        # Filter out companies with only zero block sizes - keep only companies with total blocks > 0
+        company_totals = pivot_data.sum(axis=1)
+        pivot_data = pivot_data.loc[company_totals > 0]
+        
+        # Limit to top 50 companies by total blocks for better visibility
+        company_totals = pivot_data.sum(axis=1).nlargest(50)
         pivot_data = pivot_data.loc[company_totals.index]
         
         # Create heatmap
@@ -1602,31 +1880,51 @@ def create_calendar_heatmap(block_data):
             z=pivot_data.values,
             x=[date.strftime('%Y-%m-%d') for date in pivot_data.columns],
             y=pivot_data.index,
-            colorscale='Blues',
+            colorscale='Reds',  # Keep red colorscale
             hoverongaps=False,
             hovertemplate='<b>%{y}</b><br>Date: %{x}<br>Blocks: %{z}<extra></extra>',
-            colorbar=dict(title="Block Size")
+            colorbar=dict(title="Block Size"),
+            text=pivot_data.values,  # Show numbers on heatmap
+            texttemplate="%{text}",
+            textfont={"size": 8}
         ))
         
         fig.update_layout(
-            title='Company Block Calendar Heatmap (Top 20 Companies)',
+            title='Company Block Calendar Heatmap (Top 50 Companies)',
             xaxis_title='Allotment Date',
             yaxis_title='Company Name',
-            height=max(600, len(pivot_data) * 25),
-            xaxis=dict(tickangle=45),
-            yaxis=dict(automargin=True)
+            height=max(1200, len(pivot_data) * 20),  # Keep the bigger size
+            width=1400,  # Keep increased width for better readability
+            xaxis=dict(tickangle=45, tickfont=dict(size=10)),
+            yaxis=dict(automargin=True, tickfont=dict(size=9)),
+            margin=dict(l=200, r=50, t=80, b=100)  # Standard margins
         )
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Summary stats
-        col1, col2, col3 = st.columns(3)
+        # Enhanced summary stats
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Companies Shown", len(pivot_data))
         with col2:
             st.metric("Date Range", f"{len(pivot_data.columns)} days")
         with col3:
             st.metric("Total Blocks", int(pivot_data.sum().sum()))
+        with col4:
+            # Booking status breakdown
+            status_counts = block_data.groupby('BookingStatus')['BlockSize'].sum()
+            most_common_status = status_counts.idxmax() if not status_counts.empty else "N/A"
+            st.metric("Top Status", f"{most_common_status}: {int(status_counts.max()) if not status_counts.empty else 0}")
+        
+        # Additional booking status breakdown
+        st.markdown("### 📊 Booking Status Summary")
+        if 'BookingStatus' in block_data.columns:
+            status_summary = block_data.groupby('BookingStatus').agg({
+                'BlockSize': ['sum', 'count'],
+                'CompanyName': 'nunique'
+            }).round(0)
+            status_summary.columns = ['Total Blocks', 'Number of Entries', 'Unique Companies']
+            st.dataframe(status_summary, use_container_width=True)
             
     except Exception as e:
         st.error(f"Error creating calendar heatmap: {str(e)}")
@@ -2065,21 +2363,38 @@ def events_analysis_tab():
                 # Occupancy chart for event periods
                 st.subheader("📊 Daily Occupancy During Events")
                 
-                # Create occupancy chart with event overlays
-                fig = go.Figure()
+                # Create occupancy chart with event overlays and block size trend
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
                 
-                # Add occupancy line
+                # Add occupancy line (right axis)
                 fig.add_trace(go.Scatter(
                     x=occupancy_data['Date'],
                     y=occupancy_data[occ_column],
                     mode='lines',
                     name='Occupancy %',
-                    line=dict(color='blue')
+                    line=dict(color='blue', width=2),
+                    yaxis='y2'
                 ))
                 
-                # Add threshold line
+                # Add block size trend line if block data is available (left axis)
+                if not block_data.empty and 'AllotmentDate' in block_data.columns and 'BlockSize' in block_data.columns:
+                    # Prepare block data - group by date and sum block sizes
+                    block_daily = block_data.groupby(block_data['AllotmentDate'].dt.date)['BlockSize'].sum().reset_index()
+                    block_daily['AllotmentDate'] = pd.to_datetime(block_daily['AllotmentDate'])
+                    
+                    fig.add_trace(go.Scatter(
+                        x=block_daily['AllotmentDate'],
+                        y=block_daily['BlockSize'],
+                        mode='lines',
+                        name='Total Block Size',
+                        line=dict(color='green', width=3),
+                        yaxis='y'
+                    ))
+                
+                # Add threshold line (right axis)
                 fig.add_hline(y=high_occ_threshold, line_dash="dash", line_color="red", 
-                             annotation_text=f"Threshold ({high_occ_threshold}%)")
+                             annotation_text=f"Occupancy Threshold ({high_occ_threshold}%)",
+                             secondary_y=True)
                 
                 # Add event periods as shaded areas
                 for _, event in events_df.iterrows():
@@ -2091,12 +2406,18 @@ def events_analysis_tab():
                         annotation_position="top left"
                     )
                 
+                # Update layout with dual y-axes
                 fig.update_layout(
-                    title='Daily Occupancy with Event Periods Highlighted',
+                    title='Daily Occupancy & Block Size Trends with Event Periods Highlighted',
                     xaxis_title='Date',
-                    yaxis_title='Occupancy %',
-                    height=500
+                    height=700,  # Made bigger
+                    hovermode='x unified',
+                    legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
                 )
+                
+                # Set y-axes titles
+                fig.update_yaxes(title_text="Block Size", side="left", secondary_y=False)
+                fig.update_yaxes(title_text="Occupancy %", side="right", secondary_y=True)
                 
                 st.plotly_chart(fig, use_container_width=True)
             else:
@@ -5455,6 +5776,15 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
+        # Display pickup report date if available
+        if st.session_state.pickup_report_date:
+            st.markdown(f"""
+            <div style="background-color: #1f4e79; color: white; padding: 10px; text-align: center; border-radius: 5px; margin: 10px 0;">
+                <strong>💰 MHR Pick Up Report 2025 💰</strong><br>
+                <small>Report Date: {st.session_state.pickup_report_date}</small>
+            </div>
+            """, unsafe_allow_html=True)
+        
         st.markdown("---")
         
         # Navigation with italic styling
@@ -5527,6 +5857,9 @@ def main():
         <p style="color: #666; font-size: 16px;">Current Section: <strong>{st.session_state.current_tab}</strong></p>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Display pickup report header at the top of main content
+    display_pickup_report_header()
     
     # Add hotel exterior image after title
     try:

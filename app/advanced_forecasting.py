@@ -965,10 +965,17 @@ class AdvancedForecastor:
             if current_month_data.empty:
                 return {'error': 'No current month data available'}
             
-            # Get last 7 days for moving average - but only from current month data
-            # Sort by date and get the most recent entries
-            current_month_sorted = current_month_data.sort_values('Date')
-            latest_data = current_month_sorted.tail(7).copy()
+            # Get last 7 days for moving average - should be actual completed days (excluding today)
+            # Sort by date and get the most recent ACTUAL entries (up to yesterday)
+            yesterday_date = current_date - timedelta(days=1)
+            
+            # Get last 7 days of actual data up to yesterday
+            actual_data = occupancy_df[
+                (occupancy_df['Date'].dt.date <= yesterday_date.date()) &
+                (occupancy_df['Date'].dt.date >= (yesterday_date - timedelta(days=6)).date())
+            ].copy()
+            
+            latest_data = actual_data.sort_values('Date').tail(7).copy()
             
             if len(latest_data) < 3:
                 return {'error': 'Insufficient current month data for moving average'}
@@ -998,9 +1005,9 @@ class AdvancedForecastor:
             last_day_of_month = next_month - timedelta(days=1)
             days_remaining = (last_day_of_month.date() - current_date.date()).days
             
-            # Generate forecast for remaining days
+            # Generate forecast for remaining days (from today to month end)
             forecast_dates = pd.date_range(
-                start=current_date + timedelta(days=1),
+                start=current_date,
                 end=last_day_of_month,
                 freq='D'
             )
@@ -1028,9 +1035,16 @@ class AdvancedForecastor:
                 })
             
             # Calculate month-end projections
-            current_month_revenue = current_month_data['Revenue'].sum()
+            # Get actual revenue up to yesterday (confirmed/closed days)
+            actual_revenue_to_date = current_month_data[
+                current_month_data['Date'].dt.date <= yesterday_date.date()
+            ]['Revenue'].sum()
+            
+            # Projected revenue for remaining days (from today to month end)
             remaining_revenue_forecast = sum([f['forecasted_revenue'] for f in forecast_data])
-            month_end_revenue_forecast = current_month_revenue + remaining_revenue_forecast
+            
+            # Total month-end forecast = actual confirmed revenue + projected remaining revenue
+            month_end_revenue_forecast = actual_revenue_to_date + remaining_revenue_forecast
             
             current_month_avg_occ = current_month_data['Occ%'].mean()
             forecast_avg_occ = sum([f['forecasted_occupancy'] for f in forecast_data]) / len(forecast_data) if forecast_data else 0
@@ -1044,7 +1058,7 @@ class AdvancedForecastor:
                     'avg_adr_7d': avg_adr
                 },
                 'month_projections': {
-                    'current_month_revenue': current_month_revenue,
+                    'actual_revenue_to_date': actual_revenue_to_date,
                     'remaining_revenue_forecast': remaining_revenue_forecast,
                     'month_end_revenue_forecast': month_end_revenue_forecast,
                     'current_month_avg_occ': current_month_avg_occ,
