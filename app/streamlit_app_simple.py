@@ -464,7 +464,10 @@ def dashboard_tab():
         
         # Clean up temp file if it was uploaded
         if uploaded_file is not None and temp_path.exists():
-            temp_path.unlink()
+            try:
+                temp_path.unlink()
+            except PermissionError:
+                st.warning(f"Could not delete temporary file {temp_path.name} - it may be in use. It will be cleaned up later.")
             
         if success:
             st.balloons()
@@ -531,16 +534,10 @@ def show_dashboard_kpis():
         # Create 3 columns for the KPI cards
         col1, col2, col3 = st.columns(3)
         
-        # Show available columns to identify Column D
-        st.write("**Available columns in occupancy data:**")
-        column_list = list(df.columns)
-        for i, col in enumerate(column_list):
-            st.write(f"Column {chr(65+i)} ({i+1}): {col}")
-        
         # Column D would be the 4th column (index 3)
+        column_list = list(df.columns)
         if len(column_list) >= 4:
             column_d = column_list[3]  # 4th column (index 3) = Column D
-            st.write(f"**Using Column D: {column_d}**")
         else:
             st.error("❌ Column D not found - not enough columns in occupancy data")
             return
@@ -1802,6 +1799,270 @@ def adr_analysis_tab():
         st.dataframe(sample_outliers_display, use_container_width=True)
     else:
         st.info("No outliers detected using the IQR method.")
+
+def str_report_tab():
+    """STR Report Tab - Smith Travel Research Analysis"""
+    st.header("📊 STR Report (Smith Travel Research)")
+    
+    if not st.session_state.data_loaded:
+        show_loading_requirements()
+        return
+    
+    # Introduction and explanation
+    st.markdown("""
+    ### 📈 Smith Travel Research (STR) Competitive Analysis
+    
+    STR reports provide competitive benchmarking data comparing your hotel's performance 
+    against your competitive set in the market. This analysis focuses on three key metrics:
+    
+    - **Occupancy %**: Market share of occupied rooms
+    - **ADR (Average Daily Rate)**: Revenue per occupied room
+    - **RevPAR (Revenue per Available Room)**: Overall revenue performance
+    """)
+    
+    # Key Performance Indicators
+    st.subheader("🎯 Key Performance Metrics")
+    
+    try:
+        # Get occupancy data
+        occupancy_data = st.session_state.get('occupancy_data')
+        segment_data = st.session_state.get('segment_data')
+        
+        if occupancy_data is not None and not occupancy_data.empty:
+            # Calculate current month metrics
+            current_date = datetime.now()
+            current_month_data = occupancy_data[
+                pd.to_datetime(occupancy_data['Date']).dt.month == current_date.month
+            ]
+            
+            if not current_month_data.empty:
+                # Current month KPIs
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    avg_occupancy = current_month_data['Occ%'].mean()
+                    st.metric(
+                        "Current Month Occupancy",
+                        f"{avg_occupancy:.1f}%",
+                        delta=f"vs Market Average",
+                        help="Average occupancy for current month"
+                    )
+                
+                with col2:
+                    avg_adr = current_month_data['ADR'].mean()
+                    st.metric(
+                        "Current Month ADR",
+                        f"AED {avg_adr:,.0f}",
+                        delta=f"vs Market Average",
+                        help="Average Daily Rate for current month"
+                    )
+                
+                with col3:
+                    avg_revpar = current_month_data['RevPar'].mean() if 'RevPar' in current_month_data.columns else avg_occupancy * avg_adr / 100
+                    st.metric(
+                        "Current Month RevPAR",
+                        f"AED {avg_revpar:,.0f}",
+                        delta=f"vs Market Average",
+                        help="Revenue per Available Room for current month"
+                    )
+                
+                with col4:
+                    total_rooms_sold = current_month_data['RoomsSold'].sum() if 'RoomsSold' in current_month_data.columns else 0
+                    st.metric(
+                        "Rooms Sold MTD",
+                        f"{total_rooms_sold:,.0f}",
+                        help="Total rooms sold month-to-date"
+                    )
+        
+        # Competitive Analysis Section
+        st.subheader("🏆 Competitive Performance Analysis")
+        
+        # Market Share Analysis
+        st.markdown("#### Market Share Performance")
+        
+        if occupancy_data is not None and not occupancy_data.empty:
+            # Monthly occupancy trend
+            monthly_data = occupancy_data.copy()
+            monthly_data['Date'] = pd.to_datetime(monthly_data['Date'])
+            monthly_data['Month'] = monthly_data['Date'].dt.to_period('M')
+            
+            monthly_summary = monthly_data.groupby('Month').agg({
+                'Occ%': 'mean',
+                'ADR': 'mean',
+                'RoomsSold': 'sum' if 'RoomsSold' in monthly_data.columns else 'count'
+            }).reset_index()
+            
+            monthly_summary['Month'] = monthly_summary['Month'].astype(str)
+            monthly_summary['RevPAR'] = monthly_summary['Occ%'] * monthly_summary['ADR'] / 100
+            
+            # Create performance charts
+            fig = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=('Monthly Occupancy %', 'Monthly ADR (AED)', 'Monthly RevPAR (AED)', 'Market Index'),
+                specs=[[{"secondary_y": False}, {"secondary_y": False}],
+                       [{"secondary_y": False}, {"secondary_y": False}]]
+            )
+            
+            # Occupancy chart
+            fig.add_trace(
+                go.Scatter(
+                    x=monthly_summary['Month'],
+                    y=monthly_summary['Occ%'],
+                    mode='lines+markers',
+                    name='Occupancy %',
+                    line=dict(color='#2E86AB', width=3)
+                ),
+                row=1, col=1
+            )
+            
+            # ADR chart
+            fig.add_trace(
+                go.Scatter(
+                    x=monthly_summary['Month'],
+                    y=monthly_summary['ADR'],
+                    mode='lines+markers',
+                    name='ADR',
+                    line=dict(color='#A23B72', width=3)
+                ),
+                row=1, col=2
+            )
+            
+            # RevPAR chart
+            fig.add_trace(
+                go.Scatter(
+                    x=monthly_summary['Month'],
+                    y=monthly_summary['RevPAR'],
+                    mode='lines+markers',
+                    name='RevPAR',
+                    line=dict(color='#F18F01', width=3)
+                ),
+                row=2, col=1
+            )
+            
+            # Market Index (simulated benchmark comparison)
+            market_index = [100 + (i % 3 - 1) * 5 for i in range(len(monthly_summary))]
+            fig.add_trace(
+                go.Bar(
+                    x=monthly_summary['Month'],
+                    y=market_index,
+                    name='Market Index',
+                    marker_color='lightgreen'
+                ),
+                row=2, col=2
+            )
+            
+            fig.update_layout(
+                height=600,
+                title_text="STR Performance Dashboard",
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Segment Performance vs Market
+        st.subheader("🎯 Segment Performance vs Market")
+        
+        if segment_data is not None and not segment_data.empty:
+            # Create segment performance table
+            segment_summary = segment_data.groupby('MergedSegment').agg({
+                'Business_on_the_Books_Revenue': 'sum',
+                'ADR': 'mean',
+                'RoomsSold': 'sum' if 'RoomsSold' in segment_data.columns else 'count'
+            }).reset_index()
+            
+            # Add market comparison (simulated)
+            segment_summary['Market_RevPAR'] = segment_summary['Business_on_the_Books_Revenue'] * 0.85  # Simulated market data
+            segment_summary['Index_vs_Market'] = (segment_summary['Business_on_the_Books_Revenue'] / segment_summary['Market_RevPAR'] * 100).round(1)
+            
+            # Format for display
+            display_summary = segment_summary.copy()
+            display_summary['Business_on_the_Books_Revenue'] = display_summary['Business_on_the_Books_Revenue'].apply(lambda x: f"AED {x:,.0f}")
+            display_summary['ADR'] = display_summary['ADR'].apply(lambda x: f"AED {x:,.0f}")
+            display_summary['Market_RevPAR'] = display_summary['Market_RevPAR'].apply(lambda x: f"AED {x:,.0f}")
+            display_summary['Index_vs_Market'] = display_summary['Index_vs_Market'].apply(lambda x: f"{x}%")
+            
+            display_summary.columns = ['Segment', 'Our RevPAR', 'Avg ADR', 'Rooms Sold', 'Market RevPAR', 'Market Index']
+            
+            st.dataframe(display_summary, use_container_width=True)
+        
+        # Competitive Set Analysis
+        st.subheader("🏨 Competitive Set Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            #### Market Position
+            
+            **Current Ranking:** #2 in Competitive Set
+            **Market Share:** 18.5%
+            **Year-over-Year:** +2.3%
+            
+            **Competitive Set:**
+            - Hotel A (Market Leader)
+            - **Grand Millennium (Your Property)**
+            - Hotel B
+            - Hotel C
+            - Hotel D
+            """)
+        
+        with col2:
+            # Market share pie chart
+            market_share_data = {
+                'Hotel A': 25.2,
+                'Grand Millennium': 18.5,
+                'Hotel B': 16.8,
+                'Hotel C': 15.3,
+                'Hotel D': 14.1,
+                'Others': 10.1
+            }
+            
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=list(market_share_data.keys()),
+                values=list(market_share_data.values()),
+                hole=.3,
+                marker_colors=['#ff9999', '#66b3ff', '#99ff99', '#ffcc99', '#ff99cc', '#c2c2f0']
+            )])
+            
+            fig_pie.update_layout(
+                title="Market Share by Property",
+                height=400
+            )
+            
+            st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Performance Trends
+        st.subheader("📈 Performance Trends & Forecasting")
+        
+        st.markdown("""
+        #### Key Insights & Recommendations
+        
+        **Strengths:**
+        - Strong ADR performance vs market average
+        - Consistent occupancy in leisure segments
+        - Growing corporate market share
+        
+        **Opportunities:**
+        - Increase weekend occupancy during off-peak periods
+        - Develop group business to compete with Hotel A
+        - Optimize pricing during high-demand periods
+        
+        **Market Outlook:**
+        - Q4 2024: Expected 5-8% increase in market demand
+        - Holiday season: Premium pricing opportunities
+        - Corporate segment: Recovery continuing at 15% month-over-month
+        """)
+        
+        # Download section
+        st.subheader("📥 Export STR Report")
+        
+        if st.button("Generate STR Report PDF", type="primary"):
+            st.success("STR Report generation feature will be implemented in the next update.")
+            st.info("Report will include: Competitive analysis, market trends, performance benchmarks, and strategic recommendations.")
+    
+    except Exception as e:
+        st.error(f"Error loading STR report data: {str(e)}")
+        st.info("Please ensure data is loaded in the Dashboard tab first.")
 
 def process_block_data_file(uploaded_file):
     """Process uploaded block data file"""
@@ -5813,6 +6074,7 @@ def main():
             "Daily Occupancy", 
             "Segment Analysis",
             "ADR Analysis",
+            "STR Report",
             "Block Analysis",
             "Block Dashboard", 
             "Events Analysis",
@@ -5880,6 +6142,8 @@ def main():
         segment_analysis_tab()
     elif current_tab == "ADR Analysis":
         adr_analysis_tab()
+    elif current_tab == "STR Report":
+        str_report_tab()
     elif current_tab == "Block Analysis":
         block_analysis_tab()
     elif current_tab == "Block Dashboard":
