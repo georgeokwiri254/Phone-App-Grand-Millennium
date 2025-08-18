@@ -15,6 +15,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timedelta
 import io
+import pandas as pd
 
 # Custom imports
 try:
@@ -103,6 +104,14 @@ try:
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
+
+# Enhanced Gemini Backend
+try:
+    from app.enhanced_gemini_backend import create_enhanced_gemini_backend
+    from app.interactive_chat_interface import render_enhanced_gpt_tab
+    ENHANCED_GEMINI_AVAILABLE = True
+except ImportError:
+    ENHANCED_GEMINI_AVAILABLE = False
 
 import sqlite3
 
@@ -5381,6 +5390,43 @@ def gpt_tab():
         st.markdown("---")
         st.info("👋 Welcome! Ask any question about your revenue data above to get started.")
 
+
+def enhanced_gpt_tab():
+    """Enhanced GPT AI Assistant Tab with Conversational Intelligence"""
+    
+    st.title("🚀 Enhanced AI Revenue Assistant")
+    st.markdown("**Next-generation conversational AI with advanced analytics, insights, and visual storytelling**")
+    
+    # Check if Enhanced Gemini is available
+    if not ENHANCED_GEMINI_AVAILABLE:
+        st.error("⚠️ Enhanced Gemini AI backend is not available. Using fallback to basic GPT tab.")
+        st.info("📦 To enable enhanced features, ensure all dependencies are installed.")
+        gpt_tab()  # Fallback to basic version
+        return
+    
+    # API Key configuration
+    api_key = "AIzaSyBqgrOIUjZTEJxd7o1JUxVzMoknYrzQs08"  # Your provided API key
+    
+    # Initialize enhanced backend in session state
+    if 'enhanced_gemini_backend' not in st.session_state:
+        try:
+            st.session_state.enhanced_gemini_backend = create_enhanced_gemini_backend(api_key)
+            if not st.session_state.enhanced_gemini_backend.connected:
+                st.error(f"Failed to connect to Enhanced Gemini AI: {st.session_state.enhanced_gemini_backend.error_message}")
+                return
+        except Exception as e:
+            st.error(f"Error initializing Enhanced Gemini backend: {str(e)}")
+            return
+    
+    # Render the enhanced interface
+    try:
+        render_enhanced_gpt_tab(st.session_state.enhanced_gemini_backend)
+    except Exception as e:
+        st.error(f"Error rendering enhanced interface: {str(e)}")
+        st.info("Falling back to basic GPT interface...")
+        gpt_tab()
+
+
 def main():
     """Main application with simple sidebar"""
     
@@ -5516,7 +5562,7 @@ def main():
     elif current_tab == "Machine Learning":
         machine_learning_tab()
     elif current_tab == "GPT":
-        gpt_tab()
+        enhanced_gpt_tab()
     elif current_tab == "Insights Analysis":
         insights_analysis_tab()
     elif current_tab == "Controls & Logs":
