@@ -181,10 +181,10 @@ def process_entered_on_report(file_path, output_csv_path=None):
         df['ARRIVAL_FORMATTED'] = df['ARRIVAL'].dt.strftime('%d/%m/%Y')
         df['DEPARTURE_FORMATTED'] = df['DEPARTURE'].dt.strftime('%d/%m/%Y')
         
-        # Use NET column for revenue calculations (closer to expected values) and apply 1.1x multiplier
+        # Use NET column for revenue calculations and apply 1.1x multiplier
         df['AMOUNT'] = df['NET'] * 1.1
         
-        # Apply 1.1x multiplier to original ADR column (Column O) if it exists
+        # Apply 1.1x multiplier to original ADR column (Column O) if it exists  
         if 'ADR' in df.columns:
             df['ADR'] = df['ADR'] * 1.1
         
