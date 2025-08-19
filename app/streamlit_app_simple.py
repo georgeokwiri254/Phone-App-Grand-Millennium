@@ -4058,7 +4058,8 @@ def entered_on_arrivals_tab():
                             success = db.ingest_arrivals_data(df)
                             
                             if success:
-                                else:
+                                pass
+                            else:
                                 db_status.error("❌ Failed to load data to database")
                         except Exception as e:
                             db_status.warning(f"⚠️ Database storage not available: {str(e)}")
