@@ -3421,15 +3421,15 @@ def entered_on_arrivals_tab():
                         st.error(f"Error creating interactive lead times chart: {e}")
                         st.bar_chart(lead_times.value_counts().head(20))
             
-            # 15. ADR Descriptive Statistics with Error Handling
+            # 15. ADR Descriptive Statistics with Error Handling (Column O)
             st.markdown("### 💰 ADR Descriptive Statistics")
-            if 'ADR_IN_MONTH' in entered_on_data.columns and 'SEASON' in entered_on_data.columns:
+            if 'ADR' in entered_on_data.columns and 'SEASON' in entered_on_data.columns:
                 try:
                     import scipy.stats as stats
                     import numpy as np
                     
-                    # Overall ADR stats
-                    adr_data = entered_on_data['ADR_IN_MONTH'].dropna()
+                    # Overall ADR stats from Column O
+                    adr_data = entered_on_data['ADR'].dropna()
                     
                     def safe_stat(func, data, default="N/A"):
                         try:
@@ -3496,9 +3496,9 @@ def entered_on_arrivals_tab():
                         seasons = entered_on_data['SEASON'].unique()
                         colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A']
                         
-                        # Histogram by season
+                        # Histogram by season (Column O)
                         for i, season in enumerate(seasons):
-                            season_adr = entered_on_data[entered_on_data['SEASON'] == season]['ADR_IN_MONTH'].dropna()
+                            season_adr = entered_on_data[entered_on_data['SEASON'] == season]['ADR'].dropna()
                             if not season_adr.empty:
                                 fig.add_trace(
                                     go.Histogram(
@@ -3511,9 +3511,9 @@ def entered_on_arrivals_tab():
                                     row=1, col=1
                                 )
                         
-                        # Box plot by season  
+                        # Box plot by season (Column O)
                         for i, season in enumerate(seasons):
-                            season_adr = entered_on_data[entered_on_data['SEASON'] == season]['ADR_IN_MONTH'].dropna()
+                            season_adr = entered_on_data[entered_on_data['SEASON'] == season]['ADR'].dropna()
                             if not season_adr.empty:
                                 fig.add_trace(
                                     go.Box(
@@ -3542,15 +3542,15 @@ def entered_on_arrivals_tab():
                         
                         st.plotly_chart(fig, use_container_width=True)
                         
-                        # Quick seasonal summary
-                        seasonal_summary = entered_on_data.groupby('SEASON')['ADR_IN_MONTH'].agg(['mean', 'median', 'std', 'count']).round(2)
+                        # Quick seasonal summary (Column O)
+                        seasonal_summary = entered_on_data.groupby('SEASON')['ADR'].agg(['mean', 'median', 'std', 'count']).round(2)
                         seasonal_summary.columns = ['Mean ADR', 'Median ADR', 'Std Dev', 'Count']
                         st.dataframe(seasonal_summary, use_container_width=True)
                         
                     except Exception as e:
                         st.error(f"Error creating interactive ADR charts: {e}")
-                        # Fallback to simple bar chart
-                        seasonal_adr = entered_on_data.groupby('SEASON')['ADR_IN_MONTH'].mean()
+                        # Fallback to simple bar chart (Column O)
+                        seasonal_adr = entered_on_data.groupby('SEASON')['ADR'].mean()
                         st.bar_chart(seasonal_adr)
                         
                 except Exception as e:
@@ -3751,96 +3751,6 @@ def entered_on_arrivals_tab():
             else:
                 st.info("📋 Monthly matrix data not available. This requires processing with the updated converter.")
             
-            # 19. Enhanced Calendar Heatmap - Top 10 Companies by Booked Nights
-            st.markdown(f"### 🔥 Interactive Calendar Heatmap for {month_label} - Top 10 Companies by Booked Nights")
-            if 'COMPANY_CLEAN' in entered_on_data.columns and 'ARRIVAL' in entered_on_data.columns:
-                try:
-                    import plotly.express as px
-                    import plotly.graph_objects as go
-                    from plotly.subplots import make_subplots
-                    
-                    # Get top 10 companies by nights
-                    top_companies = entered_on_data.groupby('COMPANY_CLEAN')['NIGHTS_IN_MONTH'].sum().nlargest(10)
-                    
-                    # Filter data for top companies
-                    top_company_data = entered_on_data[entered_on_data['COMPANY_CLEAN'].isin(top_companies.index)]
-                    
-                    # Create detailed booking data for heatmap
-                    top_company_data['ARRIVAL_DATE'] = pd.to_datetime(top_company_data['ARRIVAL']).dt.date
-                    
-                    # Aggregate data showing both nights and booking count
-                    heatmap_summary = top_company_data.groupby(['ARRIVAL_DATE', 'COMPANY_CLEAN']).agg({
-                        'NIGHTS_IN_MONTH': 'sum',
-                        'RESV_ID': 'count'
-                    }).reset_index()
-                    heatmap_summary.columns = ['Date', 'Company', 'Nights', 'Bookings']
-                    
-                    if not heatmap_summary.empty:
-                        # Create interactive heatmap with Plotly
-                        heatmap_pivot = heatmap_summary.pivot(index='Company', columns='Date', values='Nights').fillna(0)
-                        bookings_pivot = heatmap_summary.pivot(index='Company', columns='Date', values='Bookings').fillna(0)
-                        
-                        # Create hover text with both nights and bookings
-                        hover_text = []
-                        for i, company in enumerate(heatmap_pivot.index):
-                            hover_row = []
-                            for j, date in enumerate(heatmap_pivot.columns):
-                                nights = heatmap_pivot.iloc[i, j]
-                                bookings = bookings_pivot.iloc[i, j]
-                                if nights > 0:
-                                    hover_row.append(f"Company: {company}<br>Date: {date}<br>Nights: {nights}<br>Bookings: {bookings}")
-                                else:
-                                    hover_row.append(f"Company: {company}<br>Date: {date}<br>No bookings")
-                            hover_text.append(hover_row)
-                        
-                        fig = go.Figure(data=go.Heatmap(
-                            z=heatmap_pivot.values,
-                            x=[str(d) for d in heatmap_pivot.columns],
-                            y=heatmap_pivot.index,
-                            text=heatmap_pivot.values,
-                            texttemplate="%{text}",
-                            textfont={"size": 10},
-                            hovertemplate='%{customdata}<extra></extra>',
-                            customdata=hover_text,
-                            colorscale='Reds',
-                            colorbar=dict(title="Nights Booked")
-                        ))
-                        
-                        fig.update_layout(
-                            title={
-                                'text': 'Top 10 Companies - Interactive Booking Heatmap',
-                                'x': 0.5,
-                                'xanchor': 'center'
-                            },
-                            xaxis_title="Date",
-                            yaxis_title="Company",
-                            height=500,
-                            xaxis=dict(tickangle=45),
-                            font=dict(size=10)
-                        )
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Show booking summary statistics
-                        st.markdown("**📊 Booking Summary:**")
-                        summary_stats = top_company_data.groupby('COMPANY_CLEAN').agg({
-                            'NIGHTS_IN_MONTH': 'sum',
-                            'RESV_ID': 'count',
-                            'AMOUNT_IN_MONTH': 'sum'
-                        }).round(2)
-                        summary_stats.columns = ['Total Nights', 'Total Bookings', 'Total Revenue']
-                        summary_stats = summary_stats.sort_values('Total Nights', ascending=False)
-                        st.dataframe(summary_stats, use_container_width=True)
-                        
-                    else:
-                        st.info("Insufficient data for heatmap visualization.")
-                        
-                except Exception as e:
-                    st.error(f"Error creating interactive heatmap: {e}")
-                    # Fallback to simple chart
-                    if 'COMPANY_CLEAN' in entered_on_data.columns:
-                        top_companies = entered_on_data.groupby('COMPANY_CLEAN')['NIGHTS_IN_MONTH'].sum().nlargest(10)
-                        st.bar_chart(top_companies)
             
         else:
             st.info("No Entered On data available. Please upload an Excel file to get started.")
