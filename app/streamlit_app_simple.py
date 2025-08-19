@@ -3340,7 +3340,7 @@ def entered_on_arrivals_tab():
                     events_summary = events_data.groupby('EVENTS_DATES').agg({
                         'RESV_ID': 'count',
                         'NIGHTS_IN_MONTH': 'sum',
-                        'ADR_IN_MONTH': 'mean'
+                        'ADR': 'mean'
                     }).round(2)
                     events_summary.columns = ['Bookings', 'Nights', 'Average ADR']
                     st.dataframe(events_summary)
@@ -3659,9 +3659,63 @@ def entered_on_arrivals_tab():
             # 18. Monthly Matrix View - Aug 2025 to Dec 2026
             st.markdown("### 📊 Monthly Matrix View (Aug 2025 - Dec 2026)")
             
-            # Check if we have the new monthly columns (AUG 2025 - DEC 2026)
+            # Create dynamic date mapping for monthly columns
+            from datetime import datetime
+            monthly_date_mapping = {
+                'AUG2025': datetime(2025, 8, 1), 'SEP2025': datetime(2025, 9, 1), 'OCT2025': datetime(2025, 10, 1),
+                'NOV2025': datetime(2025, 11, 1), 'DEC2025': datetime(2025, 12, 1), 'JAN2026': datetime(2026, 1, 1),
+                'FEB2026': datetime(2026, 2, 1), 'MAR2026': datetime(2026, 3, 1), 'APR2026': datetime(2026, 4, 1),
+                'MAY2026': datetime(2026, 5, 1), 'JUN2026': datetime(2026, 6, 1), 'JUL2026': datetime(2026, 7, 1),
+                'AUG2026': datetime(2026, 8, 1), 'SEP2026': datetime(2026, 9, 1), 'OCT2026': datetime(2026, 10, 1),
+                'NOV2026': datetime(2026, 11, 1), 'DEC2026': datetime(2026, 12, 1)
+            }
+            
+            # Add dynamic month selector
+            with st.expander("🔧 Dynamic Month Filter", expanded=False):
+                st.markdown("**Filter by specific months:**")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    start_date = st.date_input(
+                        "Start Month", 
+                        value=datetime(2025, 8, 1),
+                        min_value=datetime(2025, 8, 1),
+                        max_value=datetime(2026, 12, 1),
+                        key="monthly_start_date"
+                    )
+                
+                with col2:
+                    end_date = st.date_input(
+                        "End Month",
+                        value=datetime(2026, 12, 1),
+                        min_value=datetime(2025, 8, 1),
+                        max_value=datetime(2026, 12, 1),
+                        key="monthly_end_date"
+                    )
+                
+                # Convert selected date range to applicable monthly columns
+                if start_date and end_date:
+                    selected_columns = []
+                    selected_amount_columns = []
+                    
+                    for col, date in monthly_date_mapping.items():
+                        if start_date <= date.date() <= end_date:
+                            selected_columns.append(col)
+                            selected_amount_columns.append(f"{col}_AMT")
+                    
+                    if selected_columns:
+                        st.success(f"📅 Selected months: {', '.join([col.replace('2025', ' 2025').replace('2026', ' 2026') for col in selected_columns])}")
+                    else:
+                        st.warning("No months selected in the specified range.")
+            
+            # Define monthly columns (keeping original functionality intact)
             monthly_columns = ['AUG2025', 'SEP2025', 'OCT2025', 'NOV2025', 'DEC2025', 'JAN2026', 'FEB2026', 'MAR2026', 'APR2026', 'MAY2026', 'JUN2026', 'JUL2026', 'AUG2026', 'SEP2026', 'OCT2026', 'NOV2026', 'DEC2026']
             amount_columns = ['AUG2025_AMT', 'SEP2025_AMT', 'OCT2025_AMT', 'NOV2025_AMT', 'DEC2025_AMT', 'JAN2026_AMT', 'FEB2026_AMT', 'MAR2026_AMT', 'APR2026_AMT', 'MAY2026_AMT', 'JUN2026_AMT', 'JUL2026_AMT', 'AUG2026_AMT', 'SEP2026_AMT', 'OCT2026_AMT', 'NOV2026_AMT', 'DEC2026_AMT']
+            
+            # Override with dynamic selection if available
+            if 'selected_columns' in locals() and selected_columns:
+                monthly_columns = selected_columns
+                amount_columns = selected_amount_columns
             
             has_monthly_data = any(col in entered_on_data.columns for col in monthly_columns)
             has_amount_data = any(col in entered_on_data.columns for col in amount_columns)
@@ -3793,7 +3847,7 @@ def entered_on_arrivals_tab():
                     total_revenue = entered_on_data['AMOUNT'].sum()
                 st.metric("Total Revenue", f"AED {total_revenue:,.2f}")
             with col3:
-                avg_adr = entered_on_data['ADR_IN_MONTH'].mean()
+                avg_adr = entered_on_data['ADR'].mean()
                 st.metric("Average ADR", f"AED {avg_adr:.2f}")
             with col4:
                 avg_nights = entered_on_data['NIGHTS_IN_MONTH'].mean()
@@ -3844,7 +3898,7 @@ def entered_on_arrivals_tab():
             arrival_col = 'ARRIVAL_FORMATTED' if 'ARRIVAL_FORMATTED' in all_columns else 'ARRIVAL'
             departure_col = 'DEPARTURE_FORMATTED' if 'DEPARTURE_FORMATTED' in all_columns else 'DEPARTURE'
             
-            key_columns = ['FULL_NAME', arrival_col, departure_col, 'NIGHTS', 'AMOUNT', 'ADR_IN_MONTH', 
+            key_columns = ['FULL_NAME', arrival_col, departure_col, 'NIGHTS', 'AMOUNT', 'ADR', 
                           'COMPANY_CLEAN', 'SEASON', 'SHORT_RESV_STATUS', 'ROOM', 'SPLIT_MONTH']
             available_key_columns = [col for col in key_columns if col in all_columns]
             
@@ -3886,11 +3940,11 @@ def entered_on_arrivals_tab():
                         pass
                 
                 # Highlight high ADR (>400 AED)
-                if 'ADR_IN_MONTH' in orig_row.index and pd.notna(orig_row['ADR_IN_MONTH']):
+                if 'ADR' in orig_row.index and pd.notna(orig_row['ADR']):
                     try:
-                        adr_val = float(str(orig_row['ADR_IN_MONTH']).replace('AED ', '').replace(',', ''))
+                        adr_val = float(str(orig_row['ADR']).replace('AED ', '').replace(',', ''))
                         if adr_val > 400:
-                            adr_idx = row.index.get_loc('ADR_IN_MONTH') if 'ADR_IN_MONTH' in row.index else None
+                            adr_idx = row.index.get_loc('ADR') if 'ADR' in row.index else None
                             if adr_idx is not None:
                                 styles[adr_idx] = 'background-color: #ccffcc; font-weight: bold;'  # Light green
                     except (ValueError, TypeError):
@@ -3928,8 +3982,8 @@ def entered_on_arrivals_tab():
             # Format numeric columns for better display AFTER conditional formatting setup
             if 'AMOUNT' in display_data.columns:
                 display_data['AMOUNT'] = display_data['AMOUNT'].apply(lambda x: f"AED {x:,.2f}" if pd.notna(x) else "")
-            if 'ADR_IN_MONTH' in display_data.columns:
-                display_data['ADR_IN_MONTH'] = display_data['ADR_IN_MONTH'].apply(lambda x: f"AED {x:,.2f}" if pd.notna(x) else "")
+            if 'ADR' in display_data.columns:
+                display_data['ADR'] = display_data['ADR'].apply(lambda x: f"AED {x:,.2f}" if pd.notna(x) else "")
             if 'AMOUNT_IN_MONTH' in display_data.columns:
                 display_data['AMOUNT_IN_MONTH'] = display_data['AMOUNT_IN_MONTH'].apply(lambda x: f"AED {x:,.2f}" if pd.notna(x) else "")
             
