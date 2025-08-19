@@ -3209,13 +3209,24 @@ def entered_on_arrivals_tab():
             # 7. Top Companies Analysis (AMOUNT multiplied by 1.1 in converter)
             st.markdown(f"### 🏢 Top Companies by Amount for {month_label} (with 1.1x multiplier)")
             if 'COMPANY_CLEAN' in entered_on_data.columns:
-                # Calculate company amounts from monthly columns
-                if available_amount_cols:
-                    company_amounts = entered_on_data.groupby('COMPANY_CLEAN')[available_amount_cols].sum().sum(axis=1).sort_values(ascending=False).head(10)
-                elif 'AMOUNT_IN_MONTH' in entered_on_data.columns:
-                    company_amounts = entered_on_data.groupby('COMPANY_CLEAN')['AMOUNT_IN_MONTH'].sum().sort_values(ascending=False).head(10)
+                # Calculate company amounts based on selected month filter
+                if selected_month != 'All Months':
+                    # For specific month, use only that month's amount column
+                    selected_col = selected_month.replace(' ', '')  # Convert "AUG 2025" to "AUG2025"
+                    amount_col = f"{selected_col}_AMT"
+                    if amount_col in entered_on_data.columns:
+                        company_amounts = entered_on_data.groupby('COMPANY_CLEAN')[amount_col].sum().sort_values(ascending=False).head(10)
+                    else:
+                        # Fallback to AMOUNT column if monthly column not found
+                        company_amounts = entered_on_data.groupby('COMPANY_CLEAN')['AMOUNT'].sum().sort_values(ascending=False).head(10)
                 else:
-                    company_amounts = entered_on_data.groupby('COMPANY_CLEAN')['AMOUNT'].sum().sort_values(ascending=False).head(10)
+                    # For "All Months", sum all available monthly amount columns
+                    if available_amount_cols:
+                        company_amounts = entered_on_data.groupby('COMPANY_CLEAN')[available_amount_cols].sum().sum(axis=1).sort_values(ascending=False).head(10)
+                    elif 'AMOUNT_IN_MONTH' in entered_on_data.columns:
+                        company_amounts = entered_on_data.groupby('COMPANY_CLEAN')['AMOUNT_IN_MONTH'].sum().sort_values(ascending=False).head(10)
+                    else:
+                        company_amounts = entered_on_data.groupby('COMPANY_CLEAN')['AMOUNT'].sum().sort_values(ascending=False).head(10)
                 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -3527,105 +3538,113 @@ def entered_on_arrivals_tab():
                 except Exception as e:
                     st.error(f"Error in ADR analysis: {e}")
             
-            # 16. Top 5 Companies Monthly Analysis
-            st.markdown(f"### 🏢📅 Top 5 Companies Analysis for {month_label}")
-            if 'COMPANY_CLEAN' in entered_on_data.columns and 'SPLIT_MONTH' in entered_on_data.columns:
-                # Get top 5 companies by total nights
-                top_5_companies = entered_on_data.groupby('COMPANY_CLEAN')['NIGHTS'].sum().nlargest(5).index
+            # 15.5. Top 5 Most Booked Months (by Split Dates)
+            st.markdown("### 📅🔥 Top 5 Most Booked Months (by Split Dates)")
+            try:
+                # Get available monthly columns and calculate total nights for each month
+                monthly_cols = ['AUG2025', 'SEP2025', 'OCT2025', 'NOV2025', 'DEC2025', 'JAN2026', 'FEB2026', 'MAR2026', 'APR2026', 'MAY2026', 'JUN2026', 'JUL2026', 'AUG2026', 'SEP2026', 'OCT2026', 'NOV2026', 'DEC2026']
                 
-                # Filter data for top 5 companies
-                top_company_data = entered_on_data[entered_on_data['COMPANY_CLEAN'].isin(top_5_companies)]
+                available_monthly_cols = [col for col in monthly_cols if col in entered_on_data.columns]
                 
-                # Create company-month analysis
-                # Use original AMOUNT instead of split amounts for this analysis
-                company_month_pivot = top_company_data.groupby(['COMPANY_CLEAN', 'SPLIT_MONTH']).agg({
-                    'RESV_ID': 'count',
-                    'NIGHTS': 'sum',
-                    'AMOUNT': 'sum'
-                }).round(2)
-                company_month_pivot.columns = ['Bookings', 'Nights', 'Amount']
-                
-                # Reset index to work with the data easier
-                company_month_df = company_month_pivot.reset_index()
-                
-                # Convert YYYY-MM to month names
-                def format_month(month_str):
-                    try:
-                        year, month = month_str.split('-')
-                        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-                        return f"{month_names[int(month)-1]} {year}"
-                    except:
-                        return month_str
-                
-                company_month_df['Month'] = company_month_df['SPLIT_MONTH'].apply(format_month)
-                
-                # Create pivot table for display
-                display_pivot = company_month_df.pivot(index='COMPANY_CLEAN', columns='Month', values='Nights').fillna(0)
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**Monthly Nights by Top 5 Companies:**")
-                    st.dataframe(display_pivot)
-                
-                with col2:
-                    st.markdown("**Company Performance Chart:**")
-                    # Create a stacked bar chart
-                    try:
-                        import plotly.express as px
-                        fig = px.bar(company_month_df, 
-                                   x='Month', 
-                                   y='Nights', 
-                                   color='COMPANY_CLEAN',
-                                   title="Nights by Company and Month",
-                                   height=400)
-                        fig.update_layout(xaxis_tickangle=-45)
-                        st.plotly_chart(fig, use_container_width=True)
-                    except:
-                        # Fallback to simple bar chart
-                        company_totals = company_month_df.groupby('COMPANY_CLEAN')['Nights'].sum()
-                        st.bar_chart(company_totals)
+                if available_monthly_cols:
+                    # Calculate total nights for each month
+                    month_totals = {}
+                    for col in available_monthly_cols:
+                        total_nights = entered_on_data[col].sum()
+                        if total_nights > 0:
+                            month_name = col.replace('2025', ' 2025').replace('2026', ' 2026')
+                            month_totals[month_name] = total_nights
+                    
+                    if month_totals:
+                        # Sort and get top 5 months
+                        top_months = pd.Series(month_totals).sort_values(ascending=False).head(5)
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown("**📊 Table:**")
+                            months_table = pd.DataFrame({
+                                'Month': top_months.index,
+                                'Total Nights': top_months.values.astype(int)
+                            })
+                            st.dataframe(months_table, use_container_width=True)
+                        
+                        with col2:
+                            st.markdown("**📈 Chart:**")
+                            st.bar_chart(top_months)
+                    else:
+                        st.info("No monthly split data available.")
+                else:
+                    st.info("Monthly columns not found in data.")
+            except Exception as e:
+                st.error(f"Error creating top months chart: {e}")
             
-            # 17. Top 5 Most Booked Months (only show when viewing all months)
-            if selected_month == 'All Months':
-                st.markdown("### 📈 Top 5 Most Booked Months (by Split Dates)")
-            if 'SPLIT_MONTH' in entered_on_data.columns and selected_month == 'All Months':
-                month_bookings = entered_on_data.groupby('SPLIT_MONTH').agg({
-                    'RESV_ID': 'count',
-                    'NIGHTS': 'sum',
-                    'AMOUNT': 'sum'
-                }).round(2)
-                month_bookings.columns = ['Bookings', 'Total Nights', 'Total Amount']
-                month_bookings = month_bookings.sort_values('Total Nights', ascending=False).head(5)
-                
-                # Convert YYYY-MM to month names
-                def format_month(month_str):
-                    try:
-                        year, month = month_str.split('-')
-                        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-                        return f"{month_names[int(month)-1]} {year}"
-                    except:
-                        return month_str
-                
-                month_bookings.index = [format_month(idx) for idx in month_bookings.index]
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.dataframe(month_bookings)
-                with col2:
-                    st.bar_chart(month_bookings['Total Nights'])
-                
-                # Add a monthly amount chart
-                st.markdown("#### 💰 Revenue Distribution by Month")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.bar_chart(month_bookings['Total Amount'])
-                with col2:
-                    # Calculate ADR per month
-                    month_adr = month_bookings['Total Amount'] / month_bookings['Total Nights']
-                    month_adr.name = 'Average ADR'
-                    st.line_chart(month_adr)
+            # 16. Top 5 Companies per Month Analysis
+            st.markdown("### 🏢📅 Top 5 Companies per Month Analysis")
+            if 'COMPANY_CLEAN' in entered_on_data.columns:
+                try:
+                    # Get available monthly columns
+                    monthly_cols = ['AUG2025', 'SEP2025', 'OCT2025', 'NOV2025', 'DEC2025', 'JAN2026', 'FEB2026', 'MAR2026', 'APR2026', 'MAY2026', 'JUN2026', 'JUL2026', 'AUG2026', 'SEP2026', 'OCT2026', 'NOV2026', 'DEC2026']
+                    available_monthly_cols = [col for col in monthly_cols if col in entered_on_data.columns and entered_on_data[col].sum() > 0]
+                    
+                    if available_monthly_cols:
+                        # Create a comprehensive table showing top 5 companies for each month
+                        monthly_company_data = {}
+                        
+                        for month_col in available_monthly_cols:
+                            # Get top 5 companies for this month (based on nights)
+                            month_companies = entered_on_data[entered_on_data[month_col] > 0].groupby('COMPANY_CLEAN')[month_col].sum().nlargest(5)
+                            month_name = month_col.replace('2025', ' 2025').replace('2026', ' 2026')
+                            monthly_company_data[month_name] = month_companies
+                        
+                        if monthly_company_data:
+                            # Create a comprehensive pivot table
+                            all_companies = set()
+                            for month_data in monthly_company_data.values():
+                                all_companies.update(month_data.index)
+                            
+                            # Create matrix for display
+                            company_month_matrix = pd.DataFrame(index=sorted(list(all_companies)), columns=sorted(monthly_company_data.keys()))
+                            
+                            for month, companies in monthly_company_data.items():
+                                for company, nights in companies.items():
+                                    company_month_matrix.loc[company, month] = int(nights)
+                            
+                            company_month_matrix = company_month_matrix.fillna(0).astype(int)
+                            
+                            # Show only companies that appear in top 5 for at least one month
+                            active_companies = company_month_matrix[(company_month_matrix > 0).any(axis=1)]
+                            
+                            col1, col2 = st.columns([3, 2])
+                            
+                            with col1:
+                                st.markdown("**📊 Top 5 Companies per Month (Nights):**")
+                                st.dataframe(active_companies, use_container_width=True)
+                            
+                            with col2:
+                                st.markdown("**📈 Interactive Chart:**")
+                                # Create individual month breakdown
+                                for i, (month, companies) in enumerate(list(monthly_company_data.items())[:3]):  # Show first 3 months
+                                    if not companies.empty:
+                                        st.markdown(f"**{month}:**")
+                                        companies_df = pd.DataFrame({
+                                            'Company': companies.index,
+                                            'Nights': companies.values
+                                        })
+                                        st.bar_chart(companies, height=200)
+                                        if i < 2:  # Add spacing except for last
+                                            st.markdown("---")
+                        else:
+                            st.info("No monthly company data available.")
+                    else:
+                        st.info("No monthly split data found.")
+                        
+                except Exception as e:
+                    st.error(f"Error creating company analysis: {e}")
+                    # Fallback to simple analysis
+                    if 'COMPANY_CLEAN' in entered_on_data.columns:
+                        top_companies = entered_on_data.groupby('COMPANY_CLEAN')['NIGHTS'].sum().nlargest(5)
+                        st.bar_chart(top_companies)
+            
             
             # 18. Monthly Matrix View - Aug 2025 to Dec 2026
             st.markdown("### 📊 Monthly Matrix View (Aug 2025 - Dec 2026)")
