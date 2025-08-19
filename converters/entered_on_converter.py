@@ -79,24 +79,21 @@ def determine_season(arrival_date):
 def create_monthly_matrix(df):
     """
     Create monthly matrix format as shown in the screenshot.
-    Converts split data into columns from current month till December 2026.
+    Converts split data into columns from AUG 2025 till DEC 2026.
+    Creates both NIGHTS and AMOUNT columns for each month.
     """
-    # Generate monthly columns from current month till December 2026
-    current_date = datetime.now()
-    end_date = datetime(2026, 12, 31)
+    # Generate monthly columns from AUG 2025 till DEC 2026 (16 months)
+    start_date = datetime(2025, 8, 1)  # August 2025
+    end_date = datetime(2026, 12, 31)   # December 2026
     
     months_list = []
-    temp_date = current_date.replace(day=1)  # Start from beginning of current month
+    temp_date = start_date
     
     while temp_date <= end_date:
         month_abbr = temp_date.strftime('%b').upper()
         year = temp_date.year
-        if year == current_date.year:
-            # For current year, just use month abbreviation
-            column_name = month_abbr
-        else:
-            # For future years, include year
-            column_name = f"{month_abbr}{year}"
+        # Always include year for consistency
+        column_name = f"{month_abbr}{year}"
         months_list.append((column_name, temp_date))
         temp_date = (temp_date + relativedelta(months=1))
     
@@ -112,9 +109,10 @@ def create_monthly_matrix(df):
         # Get the first row for base information
         base_row = group.iloc[0].copy()
         
-        # Initialize all monthly columns to 0
+        # Initialize all monthly columns to 0 (both nights and amounts)
         for month_col, _ in months_list:
-            base_row[month_col] = 0
+            base_row[month_col] = 0  # Nights column
+            base_row[f"{month_col}_AMT"] = 0  # Amount column
         
         # Fill in the actual monthly values
         for _, split_row in group.iterrows():
@@ -125,11 +123,15 @@ def create_monthly_matrix(df):
                 if (split_date.year == col_date.year and 
                     split_date.month == col_date.month):
                     base_row[month_col] = split_row['NIGHTS_IN_MONTH']
+                    base_row[f"{month_col}_AMT"] = split_row['AMOUNT_IN_MONTH']
                     break
         
         matrix_rows.append(base_row)
     
-    logger.info(f"Created monthly matrix with columns: {[col for col, _ in months_list]}")
+    nights_columns = [col for col, _ in months_list]
+    amount_columns = [f"{col}_AMT" for col, _ in months_list]
+    logger.info(f"Created monthly matrix with nights columns: {nights_columns}")
+    logger.info(f"Created monthly matrix with amount columns: {amount_columns}")
     return pd.DataFrame(matrix_rows)
 
 def process_entered_on_report(file_path, output_csv_path=None):
@@ -150,12 +152,37 @@ def process_entered_on_report(file_path, output_csv_path=None):
         df = pd.read_excel(file_path, sheet_name='ENTERED ON')
         logger.info(f"Loaded {len(df)} records from ENTERED ON sheet")
         
-        # Convert date columns
+        # Filter out rows where Room type is 'PM'
+        initial_count = len(df)
+        if 'ROOM' in df.columns:
+            df = df[df['ROOM'] != 'PM']
+            filtered_count = len(df)
+            logger.info(f"Filtered out {initial_count - filtered_count} records with Room type 'PM'")
+        
+        # Filter out rows where guest name contains 'room move' (case insensitive)
+        room_move_count = len(df)
+        if 'FULL_NAME' in df.columns:
+            df = df[~df['FULL_NAME'].str.contains('room move', case=False, na=False)]
+            filtered_room_move_count = len(df)
+            logger.info(f"Filtered out {room_move_count - filtered_room_move_count} records with guest name containing 'room move'")
+        
+        # Also filter by FIRST NAME column if it exists
+        if 'FIRST NAME' in df.columns:
+            first_name_count = len(df)
+            df = df[~df['FIRST NAME'].str.contains('room move', case=False, na=False)]
+            filtered_first_name_count = len(df)
+            logger.info(f"Filtered out {first_name_count - filtered_first_name_count} additional records with first name containing 'room move'")
+        
+        # Convert date columns to datetime then format as dd/mm/yyyy for display
         df['ARRIVAL'] = pd.to_datetime(df['ARRIVAL'])
         df['DEPARTURE'] = pd.to_datetime(df['DEPARTURE'])
         
-        # Multiply AMOUNT by 1.1 as requested
-        df['AMOUNT'] = df['AMOUNT'] * 1.1
+        # Create formatted date columns for display (dd/mm/yyyy format)
+        df['ARRIVAL_FORMATTED'] = df['ARRIVAL'].dt.strftime('%d/%m/%Y')
+        df['DEPARTURE_FORMATTED'] = df['DEPARTURE'].dt.strftime('%d/%m/%Y')
+        
+        # Use NET column for revenue calculations (closer to expected values)
+        df['AMOUNT'] = df['NET']
         
         # Calculate additional fields (check if Season column already exists)
         if 'Season' not in df.columns:
@@ -222,6 +249,13 @@ def process_entered_on_report(file_path, output_csv_path=None):
         matrix_df = create_monthly_matrix(expanded_df)
         logger.info(f"Created monthly matrix with {len(matrix_df)} bookings")
         
+        # Remove split-related columns since we now have monthly matrix columns
+        split_columns_to_remove = ['SPLIT_MONTH', 'SPLIT_YEAR', 'SPLIT_MONTH_NUM', 'NIGHTS_IN_MONTH', 'AMOUNT_IN_MONTH', 'PERIOD_START', 'PERIOD_END', 'ADR_IN_MONTH']
+        for col in split_columns_to_remove:
+            if col in matrix_df.columns:
+                matrix_df = matrix_df.drop(columns=[col])
+        logger.info(f"Removed split columns, now have {len(matrix_df.columns)} columns")
+        
         # Set output path if not provided
         if output_csv_path is None:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -234,12 +268,65 @@ def process_entered_on_report(file_path, output_csv_path=None):
         matrix_df.to_csv(output_csv_path, index=False)
         logger.info(f"Saved monthly matrix data to: {output_csv_path}")
         
-        # Also save canonical version
+        # Always try to save canonical version - use multiple strategies
         canonical_path = "data/processed/entered_on.csv"
-        matrix_df.to_csv(canonical_path, index=False)
-        logger.info(f"Saved canonical version to: {canonical_path}")
+        temp_canonical_path = "data/processed/entered_on_temp.csv"
         
-        return matrix_df, canonical_path
+        success = False
+        
+        # Strategy 1: Direct overwrite (works if file is not locked)
+        try:
+            matrix_df.to_csv(canonical_path, index=False)
+            logger.info(f"Saved canonical version to: {canonical_path}")
+            success = True
+        except PermissionError:
+            logger.warning(f"Direct overwrite failed - file may be in use")
+        
+        # Strategy 2: Atomic write with temp file + rename (if direct failed)
+        if not success:
+            try:
+                # Write to temporary file first
+                matrix_df.to_csv(temp_canonical_path, index=False)
+                
+                # Try to remove old file
+                if os.path.exists(canonical_path):
+                    try:
+                        os.remove(canonical_path)
+                    except PermissionError:
+                        # Try a few more times with small delays
+                        import time
+                        for attempt in range(3):
+                            time.sleep(0.1)  # Wait 100ms
+                            try:
+                                os.remove(canonical_path)
+                                break
+                            except PermissionError:
+                                continue
+                        else:
+                            # Still can't remove - clean up and use timestamped version
+                            logger.warning(f"Could not replace canonical file after multiple attempts")
+                            os.remove(temp_canonical_path)
+                            return matrix_df, output_csv_path
+                
+                # Rename temp file to canonical name
+                os.rename(temp_canonical_path, canonical_path)
+                logger.info(f"Saved canonical version to: {canonical_path} (using atomic write)")
+                success = True
+                
+            except Exception as e:
+                # Clean up temp file if it exists
+                if os.path.exists(temp_canonical_path):
+                    try:
+                        os.remove(temp_canonical_path)
+                    except:
+                        pass
+                logger.warning(f"Atomic write failed: {e}")
+        
+        if success:
+            return matrix_df, canonical_path
+        else:
+            logger.warning(f"Could not save canonical version, using timestamped file: {output_csv_path}")
+            return matrix_df, output_csv_path
         
     except Exception as e:
         logger.error(f"Error processing Entered On report: {e}")

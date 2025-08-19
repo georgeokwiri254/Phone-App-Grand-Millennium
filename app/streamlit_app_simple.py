@@ -1174,8 +1174,14 @@ def daily_occupancy_tab():
     st.info(f"Showing {len(table_df)} rows")
 
 def segment_analysis_tab():
-    """Segment Analysis Tab"""
+    """Segment Analysis Tab with sub-tabs"""
     st.header("🎯 Segment Analysis")
+    
+    # Create sub-tabs
+    analysis_tab, market_seg_tab = st.tabs(["📊 Revenue Analysis", "📋 Market Segmentation"])
+    
+    with analysis_tab:
+        st.subheader("📊 Revenue Analysis")
     
     if not st.session_state.data_loaded:
         show_loading_requirements()
@@ -1497,6 +1503,117 @@ def segment_analysis_tab():
                 summary_stats[col] = summary_stats[col].apply(lambda x: f"AED {x:,.0f}" if pd.notna(x) else "AED 0")
         
         st.dataframe(summary_stats, use_container_width=True)
+    
+    with market_seg_tab:
+        st.subheader("📋 MHR Market Segmentation Documentation")
+        st.info("This section displays the official MHR Market Segmentation guidelines document from November 2018.")
+        
+        # Display key segment categories overview
+        st.markdown("### 🎯 Market Segment Categories Overview")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 🛒 **RETAIL Segments**")
+            st.markdown("""
+            - **UMLP** - Unmanaged Leisure Premium  
+            - **UMLD** - Unmanaged Leisure Discount  
+            - **PACK** - Package  
+            - **TPIM/ODIM** - Third Party Intermediary Merchant  
+            """)
+            
+            st.markdown("#### 🏢 **NEGOTIATED CORPORATE Segments**")
+            st.markdown("""
+            - **MCGL** - Managed Corporate Global  
+            - **MCLO** - Managed Corporate Local  
+            """)
+            
+            st.markdown("#### 🏛️ **GOVERNMENT Segments**")
+            st.markdown("""
+            - **GOVT** - Government  
+            """)
+        
+        with col2:
+            st.markdown("#### 🏭 **WHOLESALE Segments**")
+            st.markdown("""
+            - **WHOL** - Wholesale Fixed Value  
+            """)
+            
+            st.markdown("#### 👥 **GROUP Segments**")
+            st.markdown("""
+            - **CORG** - Corporate Groups  
+            - **CONV** - Convention Groups  
+            - **ASSO** - Association Groups  
+            - **ADHO** - Adhoc Groups  
+            - **TOUR** - Tour Series Groups  
+            - **CONT** - Contract  
+            """)
+            
+            st.markdown("#### 🎁 **OTHER Segments**")
+            st.markdown("""
+            - **CPHS** - Complimentary & House Use  
+            """)
+        
+        st.markdown("---")
+        
+        # PDF file path
+        pdf_path = "MHR Market Segmentation_071218.pdf"
+        
+        # Check if PDF exists
+        if os.path.exists(pdf_path):
+            try:
+                # Read and display the PDF
+                with open(pdf_path, "rb") as pdf_file:
+                    pdf_bytes = pdf_file.read()
+                
+                # Display PDF download link
+                st.download_button(
+                    label="📥 Download MHR Market Segmentation PDF",
+                    data=pdf_bytes,
+                    file_name="MHR_Market_Segmentation_071218.pdf",
+                    mime="application/pdf"
+                )
+                
+                st.markdown("---")
+                
+                # Display PDF content using Read tool
+                st.markdown("### 📄 Document Content")
+                st.markdown("*The PDF document content is displayed below:*")
+                
+                # Display the actual PDF content using Read tool
+                pdf_content_placeholder = st.empty()
+                
+                try:
+                    # Use base64 encoding to display PDF in iframe
+                    import base64
+                    base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+                    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf"></iframe>'
+                    st.markdown(pdf_display, unsafe_allow_html=True)
+                except Exception as display_error:
+                    st.warning(f"PDF inline display not supported. Error: {display_error}")
+                    # Fallback: Show file info and encourage download
+                    st.info("📋 PDF document is available for download above. Some browsers may not support inline PDF viewing.")
+                    
+                    # Show file information
+                    file_size = len(pdf_bytes) / 1024  # Size in KB
+                    st.metric("File Size", f"{file_size:.1f} KB")
+                    
+                    # Try to extract some basic info about the PDF
+                    st.markdown("**Document Information:**")
+                    st.markdown("- **Title:** MHR Market Segmentation Guidelines")
+                    st.markdown("- **Date:** December 7, 2018")
+                    st.markdown("- **Purpose:** Official market segmentation documentation for revenue analysis")
+                
+            except Exception as e:
+                st.error(f"Error loading PDF: {str(e)}")
+                st.info("Please ensure the PDF file 'MHR Market Segmentation_071218.pdf' is in the project root directory.")
+        else:
+            st.error("📄 PDF file not found!")
+            st.info("The file 'MHR Market Segmentation_071218.pdf' should be placed in the project root directory.")
+            st.markdown("**Expected file path:** `MHR Market Segmentation_071218.pdf`")
+            
+            # Show expected location
+            st.code("./MHR Market Segmentation_071218.pdf")
 
 def adr_analysis_tab():
     """ADR Analysis Tab with comprehensive statistical analysis"""
@@ -2128,22 +2245,97 @@ def create_calendar_heatmap(block_data):
             fill_value=0
         )
         
+        # Create booking status pivot for hover text
+        status_pivot = block_data.pivot_table(
+            index='CompanyName',
+            columns='AllotmentDate',
+            values='BookingStatus',
+            aggfunc=lambda x: ', '.join(sorted(set(x), key=['ACT', 'DEF', 'TEN', 'PSP'].index)),
+            fill_value=''
+        )
+        
         # Filter out companies with only zero block sizes - keep only companies with total blocks > 0
         company_totals = pivot_data.sum(axis=1)
         pivot_data = pivot_data.loc[company_totals > 0]
+        status_pivot = status_pivot.loc[company_totals > 0]
         
         # Limit to top 50 companies by total blocks for better visibility
         company_totals = pivot_data.sum(axis=1).nlargest(50)
         pivot_data = pivot_data.loc[company_totals.index]
+        status_pivot = status_pivot.loc[company_totals.index]
+        
+        # Sort companies by booking status priority (ACT, DEF, TEN, PSP)
+        def get_primary_status_priority(company):
+            # Get all statuses for this company across all dates
+            company_statuses = status_pivot.loc[company]
+            all_statuses = set()
+            for status_list in company_statuses:
+                if status_list:
+                    all_statuses.update(status_list.split(', '))
+            
+            # Return priority based on highest priority status
+            status_priority = {'ACT': 0, 'DEF': 1, 'TEN': 2, 'PSP': 3}
+            if 'ACT' in all_statuses:
+                return 0
+            elif 'DEF' in all_statuses:
+                return 1
+            elif 'TEN' in all_statuses:
+                return 2
+            elif 'PSP' in all_statuses:
+                return 3
+            else:
+                return 4  # Unknown status
+        
+        # Sort companies by status priority, then by total blocks (descending)
+        company_priorities = [(company, get_primary_status_priority(company), company_totals[company]) 
+                             for company in pivot_data.index]
+        company_priorities.sort(key=lambda x: (x[1], -x[2]))  # Sort by priority, then by blocks descending
+        sorted_companies = [item[0] for item in company_priorities]
+        
+        # Reorder the data according to sorted companies
+        pivot_data = pivot_data.reindex(sorted_companies)
+        status_pivot = status_pivot.reindex(sorted_companies)
+        
+        # Create status labels for y-axis
+        status_labels = []
+        status_icons = {'ACT': '🟢', 'DEF': '🟡', 'TEN': '🟠', 'PSP': '🔴'}
+        for company in sorted_companies:
+            priority = get_primary_status_priority(company)
+            if priority == 0:
+                label = f"🟢 {company}"
+            elif priority == 1:
+                label = f"🟡 {company}"
+            elif priority == 2:
+                label = f"🟠 {company}"
+            elif priority == 3:
+                label = f"🔴 {company}"
+            else:
+                label = f"⚫ {company}"
+            status_labels.append(label)
+        
+        # Create custom hover text that includes booking status
+        hover_text = []
+        for i, company in enumerate(pivot_data.index):
+            row_text = []
+            for j, date in enumerate(pivot_data.columns):
+                blocks = pivot_data.iloc[i, j]
+                status = status_pivot.iloc[i, j] if status_pivot.iloc[i, j] else 'No bookings'
+                if blocks > 0:
+                    text = f"<b>{company}</b><br>Date: {date.strftime('%Y-%m-%d')}<br>Blocks: {blocks}<br>Status: {status}"
+                else:
+                    text = f"<b>{company}</b><br>Date: {date.strftime('%Y-%m-%d')}<br>No bookings"
+                row_text.append(text)
+            hover_text.append(row_text)
         
         # Create heatmap
         fig = go.Figure(data=go.Heatmap(
             z=pivot_data.values,
             x=[date.strftime('%Y-%m-%d') for date in pivot_data.columns],
-            y=pivot_data.index,
+            y=status_labels,  # Use status labels instead of company names
             colorscale='Reds',  # Keep red colorscale
             hoverongaps=False,
-            hovertemplate='<b>%{y}</b><br>Date: %{x}<br>Blocks: %{z}<extra></extra>',
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_text,
             colorbar=dict(title="Block Size"),
             text=pivot_data.values,  # Show numbers on heatmap
             texttemplate="%{text}",
@@ -2151,17 +2343,31 @@ def create_calendar_heatmap(block_data):
         ))
         
         fig.update_layout(
-            title='Company Block Calendar Heatmap (Top 50 Companies)',
+            title='Company Block Calendar Heatmap - Sorted by Status Priority (ACT, DEF, TEN, PSP)',
             xaxis_title='Allotment Date',
-            yaxis_title='Company Name',
+            yaxis_title='Company Name (with Status Indicator)',
             height=max(1200, len(pivot_data) * 20),  # Keep the bigger size
             width=1400,  # Keep increased width for better readability
             xaxis=dict(tickangle=45, tickfont=dict(size=10)),
-            yaxis=dict(automargin=True, tickfont=dict(size=9)),
-            margin=dict(l=200, r=50, t=80, b=100)  # Standard margins
+            yaxis=dict(automargin=True, tickfont=dict(size=8)),  # Slightly smaller font for longer labels
+            margin=dict(l=350, r=50, t=80, b=100)  # Increased left margin for status icons and longer labels
         )
         
         st.plotly_chart(fig, use_container_width=True)
+        
+        # Booking Status Legend
+        st.markdown("### 🔍 Booking Status Legend & Company Sorting")
+        legend_col1, legend_col2, legend_col3, legend_col4 = st.columns(4)
+        with legend_col1:
+            st.markdown("**🟢 ACT** - Actual (Confirmed)")
+        with legend_col2:
+            st.markdown("**🟡 DEF** - Definite (High Probability)")
+        with legend_col3:
+            st.markdown("**🟠 TEN** - Tentative (Under Review)")
+        with legend_col4:
+            st.markdown("**🔴 PSP** - Prospect (Early Stage)")
+        
+        st.info("💡 **Companies are sorted by highest priority status (ACT → DEF → TEN → PSP), then by total block size.** Each company is labeled with its primary status icon on the y-axis. Hover over cells for detailed booking status information.")
         
         # Enhanced summary stats
         col1, col2, col3, col4 = st.columns(4)
@@ -2185,6 +2391,11 @@ def create_calendar_heatmap(block_data):
                 'CompanyName': 'nunique'
             }).round(0)
             status_summary.columns = ['Total Blocks', 'Number of Entries', 'Unique Companies']
+            
+            # Reorder the status summary to show ACT, DEF, TEN, PSP in that order
+            status_order = ['ACT', 'DEF', 'TEN', 'PSP']
+            status_summary = status_summary.reindex([status for status in status_order if status in status_summary.index])
+            
             st.dataframe(status_summary, use_container_width=True)
             
     except Exception as e:
@@ -2842,19 +3053,80 @@ def entered_on_arrivals_tab():
             entered_on_data = st.session_state.get('entered_on_data')
         
         if entered_on_data is not None and not entered_on_data.empty:
+            # Show data processing info
+            st.info("ℹ️ **Data Processing Applied:** Room type 'PM' bookings and guest names containing 'room move' have been automatically filtered out. Dates are displayed in dd/mm/yyyy format.")
+            
+            # Month Filter Control
+            st.markdown("---")
+            st.subheader("📅 Month Filter")
+            
+            # Get available months from the data
+            available_months = ['All Months'] + sorted(entered_on_data['SPLIT_MONTH'].unique().tolist()) if 'SPLIT_MONTH' in entered_on_data.columns else ['All Months']
+            
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                selected_month = st.selectbox(
+                    "Select Month for Analysis:",
+                    available_months,
+                    index=0,
+                    help="Filter all KPIs and charts by selected month. 'All Months' shows combined data."
+                )
+            
+            with col2:
+                if selected_month != 'All Months':
+                    month_data = entered_on_data[entered_on_data['SPLIT_MONTH'] == selected_month]
+                    st.info(f"📊 Showing data for **{selected_month}** - {len(month_data)} records")
+                else:
+                    month_data = entered_on_data
+                    st.info(f"📊 Showing data for **All Months** - {len(month_data)} records")
+            
+            # Use filtered data for all subsequent analysis
+            entered_on_data = month_data
+            
             # Comprehensive EDA Analysis
             st.markdown("---")
             st.markdown("## 📊 Comprehensive EDA Analysis")
+            st.markdown(f"### Analysis for: **{selected_month}**" if selected_month != 'All Months' else "### Analysis for: **All Months Combined**")
             
-            # 6. Main KPI Cards (AMOUNT total and Room nights)
+            # 6. Main KPI Cards (AMOUNT total and Room nights) - Split vs Total
             st.markdown("### 📈 *Key Performance Indicators*")
-            col1, col2, col3, col4, col5 = st.columns(5)
             
+            # Calculate both split (monthly) and original (total booking) metrics
             total_bookings = len(entered_on_data['RESV_ID'].unique()) if 'RESV_ID' in entered_on_data.columns else len(entered_on_data)
-            total_amount = entered_on_data['AMOUNT_IN_MONTH'].sum()
-            total_nights = entered_on_data['NIGHTS_IN_MONTH'].sum()
-            avg_adr = entered_on_data['ADR_IN_MONTH'].mean()
+            
+            # Calculate totals from monthly columns instead of AMOUNT_IN_MONTH
+            monthly_amount_cols = ['AUG2025_AMT', 'SEP2025_AMT', 'OCT2025_AMT', 'NOV2025_AMT', 'DEC2025_AMT', 'JAN2026_AMT', 'FEB2026_AMT', 'MAR2026_AMT', 'APR2026_AMT', 'MAY2026_AMT', 'JUN2026_AMT', 'JUL2026_AMT', 'AUG2026_AMT', 'SEP2026_AMT', 'OCT2026_AMT', 'NOV2026_AMT', 'DEC2026_AMT']
+            monthly_nights_cols = ['AUG2025', 'SEP2025', 'OCT2025', 'NOV2025', 'DEC2025', 'JAN2026', 'FEB2026', 'MAR2026', 'APR2026', 'MAY2026', 'JUN2026', 'JUL2026', 'AUG2026', 'SEP2026', 'OCT2026', 'NOV2026', 'DEC2026']
+            
+            available_amount_cols = [col for col in monthly_amount_cols if col in entered_on_data.columns]
+            available_nights_cols = [col for col in monthly_nights_cols if col in entered_on_data.columns]
+            
+            # Calculate totals from monthly matrix columns
+            if available_amount_cols:
+                split_amount = entered_on_data[available_amount_cols].sum().sum()
+            else:
+                # Fallback to AMOUNT_IN_MONTH if monthly columns don't exist
+                split_amount = entered_on_data['AMOUNT_IN_MONTH'].sum() if 'AMOUNT_IN_MONTH' in entered_on_data.columns else 0
+                
+            if available_nights_cols:
+                split_nights = entered_on_data[available_nights_cols].sum().sum()
+            else:
+                # Fallback to NIGHTS_IN_MONTH if monthly columns don't exist
+                split_nights = entered_on_data['NIGHTS_IN_MONTH'].sum() if 'NIGHTS_IN_MONTH' in entered_on_data.columns else 0
+            
+            split_adr = split_amount / split_nights if split_nights > 0 else 0
+            
+            # Original booking totals (before month splitting)
+            original_amount = entered_on_data['AMOUNT'].sum() if 'AMOUNT' in entered_on_data.columns else split_amount
+            original_nights = entered_on_data['NIGHTS'].sum() if 'NIGHTS' in entered_on_data.columns else split_nights
+            original_adr = entered_on_data['ADR'].mean() if 'ADR' in entered_on_data.columns else split_adr
+            
             long_bookings = entered_on_data['LONG_BOOKING_FLAG'].sum() if 'LONG_BOOKING_FLAG' in entered_on_data.columns else 0
+            
+            # Display both sets of metrics with dynamic labeling
+            month_label = selected_month if selected_month != 'All Months' else 'All Months'
+            st.markdown(f"#### 🗓️ Split Metrics for {month_label}")
+            col1, col2, col3, col4, col5 = st.columns(5)
             
             # Custom CSS for much smaller italic KPI text (40% smaller)
             st.markdown("""
@@ -2900,7 +3172,7 @@ def entered_on_arrivals_tab():
             </style>
             """, unsafe_allow_html=True)
             
-            # Use custom HTML for better control
+            # Monthly Split KPIs
             kpi_html = f"""
             <div style="display: flex; justify-content: space-between; gap: 10px;">
                 <div class="small-kpi">
@@ -2908,16 +3180,16 @@ def entered_on_arrivals_tab():
                     <div class="value">{total_bookings:,}</div>
                 </div>
                 <div class="small-kpi">
-                    <div class="label">Total Amount</div>
-                    <div class="value">AED {total_amount:,.2f}</div>
+                    <div class="label">Split Amount</div>
+                    <div class="value">AED {split_amount:,.2f}</div>
                 </div>
                 <div class="small-kpi">
-                    <div class="label">Room Nights</div>
-                    <div class="value">{int(total_nights):,}</div>
+                    <div class="label">Split Nights</div>
+                    <div class="value">{int(split_nights):,}</div>
                 </div>
                 <div class="small-kpi">
-                    <div class="label">Average ADR</div>
-                    <div class="value">AED {avg_adr:.2f}</div>
+                    <div class="label">Split ADR</div>
+                    <div class="value">AED {split_adr:.2f}</div>
                 </div>
                 <div class="small-kpi">
                     <div class="label">Long Bookings (>10 nights)</div>
@@ -2925,13 +3197,54 @@ def entered_on_arrivals_tab():
                 </div>
             </div>
             """
-            
             st.markdown(kpi_html, unsafe_allow_html=True)
             
+            st.markdown(f"#### 📋 Original Booking Totals for {month_label} (Full Stay Duration)")
+            
+            # Original Booking KPIs
+            original_kpi_html = f"""
+            <div style="display: flex; justify-content: space-between; gap: 10px;">
+                <div class="small-kpi" style="background-color: #f0f8ff;">
+                    <div class="label">Total Bookings</div>
+                    <div class="value">{total_bookings:,}</div>
+                </div>
+                <div class="small-kpi" style="background-color: #f0f8ff;">
+                    <div class="label">Original Amount</div>
+                    <div class="value">AED {original_amount:,.2f}</div>
+                </div>
+                <div class="small-kpi" style="background-color: #f0f8ff;">
+                    <div class="label">Original Nights</div>
+                    <div class="value">{int(original_nights):,}</div>
+                </div>
+                <div class="small-kpi" style="background-color: #f0f8ff;">
+                    <div class="label">Original ADR</div>
+                    <div class="value">AED {original_adr:.2f}</div>
+                </div>
+                <div class="small-kpi" style="background-color: #f0f8ff;">
+                    <div class="label">Difference</div>
+                    <div class="value">+{original_nights - split_nights:.0f} nights</div>
+                </div>
+            </div>
+            """
+            st.markdown(kpi_html, unsafe_allow_html=True)
+            st.markdown(original_kpi_html, unsafe_allow_html=True)
+            
+            # Add explanation
+            if selected_month != 'All Months':
+                st.info(f"ℹ️ **Split vs Original for {selected_month}:** Split metrics show only the portion allocated to {selected_month}. Original metrics show the full booking amounts for bookings that have nights in {selected_month}. Long-stay bookings are automatically split across months proportionally.")
+            else:
+                st.info("ℹ️ **Split vs Original:** Split metrics show the combined allocation across all months. Original metrics show the full booking amounts before month splitting. Long-stay bookings are automatically split across months proportionally.")
+            
             # 7. Top Companies Analysis (AMOUNT multiplied by 1.1 in converter)
-            st.markdown("### 🏢 Top Companies by Amount (with 1.1x multiplier)")
-            if 'COMPANY_CLEAN' in entered_on_data.columns and 'AMOUNT_IN_MONTH' in entered_on_data.columns:
-                company_amounts = entered_on_data.groupby('COMPANY_CLEAN')['AMOUNT_IN_MONTH'].sum().sort_values(ascending=False).head(10)
+            st.markdown(f"### 🏢 Top Companies by Amount for {month_label} (with 1.1x multiplier)")
+            if 'COMPANY_CLEAN' in entered_on_data.columns:
+                # Calculate company amounts from monthly columns
+                if available_amount_cols:
+                    company_amounts = entered_on_data.groupby('COMPANY_CLEAN')[available_amount_cols].sum().sum(axis=1).sort_values(ascending=False).head(10)
+                elif 'AMOUNT_IN_MONTH' in entered_on_data.columns:
+                    company_amounts = entered_on_data.groupby('COMPANY_CLEAN')['AMOUNT_IN_MONTH'].sum().sort_values(ascending=False).head(10)
+                else:
+                    company_amounts = entered_on_data.groupby('COMPANY_CLEAN')['AMOUNT'].sum().sort_values(ascending=False).head(10)
                 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -2993,18 +3306,30 @@ def entered_on_arrivals_tab():
                     st.bar_chart(room_counts)
             
             # 12. Seasonal EDA (SEASON column)
-            st.markdown("### 🌞 Seasonal Analysis")
+            st.markdown(f"### 🌞 Seasonal Analysis for {month_label}")
             if 'SEASON' in entered_on_data.columns:
-                seasonal_analysis = entered_on_data.groupby('SEASON').agg({
-                    'NIGHTS_IN_MONTH': 'sum',
-                    'AMOUNT_IN_MONTH': ['sum', 'mean'],
-                    'ADR_IN_MONTH': 'mean'
-                }).round(2)
-                seasonal_analysis.columns = ['Total Nights', 'Total Amount', 'Avg Amount', 'Avg ADR']
+                # Create seasonal analysis with monthly columns
+                seasonal_agg_dict = {}
+                if available_nights_cols:
+                    seasonal_agg_dict.update({col: 'sum' for col in available_nights_cols})
+                elif 'NIGHTS_IN_MONTH' in entered_on_data.columns:
+                    seasonal_agg_dict['NIGHTS_IN_MONTH'] = 'sum'
+                    
+                if available_amount_cols:
+                    seasonal_agg_dict.update({col: ['sum', 'mean'] for col in available_amount_cols})
+                elif 'AMOUNT_IN_MONTH' in entered_on_data.columns:
+                    seasonal_agg_dict['AMOUNT_IN_MONTH'] = ['sum', 'mean']
+                
+                seasonal_analysis = entered_on_data.groupby('SEASON').agg(seasonal_agg_dict).round(2)
                 st.dataframe(seasonal_analysis)
                 
-                # Seasonal distribution chart
-                seasonal_nights = entered_on_data.groupby('SEASON')['NIGHTS_IN_MONTH'].sum()
+                # Seasonal distribution chart using monthly columns
+                if available_nights_cols:
+                    seasonal_nights = entered_on_data.groupby('SEASON')[available_nights_cols].sum().sum(axis=1)
+                elif 'NIGHTS_IN_MONTH' in entered_on_data.columns:
+                    seasonal_nights = entered_on_data.groupby('SEASON')['NIGHTS_IN_MONTH'].sum()
+                else:
+                    seasonal_nights = entered_on_data.groupby('SEASON')['NIGHTS'].sum()
                 st.bar_chart(seasonal_nights)
             
             # 13. Events Analysis (EVENTS_DATES column)
@@ -3232,7 +3557,7 @@ def entered_on_arrivals_tab():
                     st.error(f"Error in ADR analysis: {e}")
             
             # 16. Top 5 Companies Monthly Analysis
-            st.markdown("### 🏢📅 Top 5 Companies - Monthly Analysis")
+            st.markdown(f"### 🏢📅 Top 5 Companies Analysis for {month_label}")
             if 'COMPANY_CLEAN' in entered_on_data.columns and 'SPLIT_MONTH' in entered_on_data.columns:
                 # Get top 5 companies by total nights
                 top_5_companies = entered_on_data.groupby('COMPANY_CLEAN')['NIGHTS_IN_MONTH'].sum().nlargest(5).index
@@ -3241,10 +3566,11 @@ def entered_on_arrivals_tab():
                 top_company_data = entered_on_data[entered_on_data['COMPANY_CLEAN'].isin(top_5_companies)]
                 
                 # Create company-month analysis
+                # Use original AMOUNT instead of split amounts for this analysis
                 company_month_pivot = top_company_data.groupby(['COMPANY_CLEAN', 'SPLIT_MONTH']).agg({
                     'RESV_ID': 'count',
-                    'NIGHTS_IN_MONTH': 'sum',
-                    'AMOUNT_IN_MONTH': 'sum'
+                    'NIGHTS': 'sum',
+                    'AMOUNT': 'sum'
                 }).round(2)
                 company_month_pivot.columns = ['Bookings', 'Nights', 'Amount']
                 
@@ -3289,13 +3615,14 @@ def entered_on_arrivals_tab():
                         company_totals = company_month_df.groupby('COMPANY_CLEAN')['Nights'].sum()
                         st.bar_chart(company_totals)
             
-            # 17. Top 5 Most Booked Months
-            st.markdown("### 📈 Top 5 Most Booked Months (by Split Dates)")
-            if 'SPLIT_MONTH' in entered_on_data.columns:
+            # 17. Top 5 Most Booked Months (only show when viewing all months)
+            if selected_month == 'All Months':
+                st.markdown("### 📈 Top 5 Most Booked Months (by Split Dates)")
+            if 'SPLIT_MONTH' in entered_on_data.columns and selected_month == 'All Months':
                 month_bookings = entered_on_data.groupby('SPLIT_MONTH').agg({
                     'RESV_ID': 'count',
-                    'NIGHTS_IN_MONTH': 'sum',
-                    'AMOUNT_IN_MONTH': 'sum'
+                    'NIGHTS': 'sum',
+                    'AMOUNT': 'sum'
                 }).round(2)
                 month_bookings.columns = ['Bookings', 'Total Nights', 'Total Amount']
                 month_bookings = month_bookings.sort_values('Total Nights', ascending=False).head(5)
@@ -3317,9 +3644,115 @@ def entered_on_arrivals_tab():
                     st.dataframe(month_bookings)
                 with col2:
                     st.bar_chart(month_bookings['Total Nights'])
+                
+                # Add a monthly amount chart
+                st.markdown("#### 💰 Revenue Distribution by Month")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.bar_chart(month_bookings['Total Amount'])
+                with col2:
+                    # Calculate ADR per month
+                    month_adr = month_bookings['Total Amount'] / month_bookings['Total Nights']
+                    month_adr.name = 'Average ADR'
+                    st.line_chart(month_adr)
+            
+            # 18. Monthly Matrix View - Aug 2025 to Dec 2026
+            st.markdown("### 📊 Monthly Matrix View (Aug 2025 - Dec 2026)")
+            
+            # Check if we have the new monthly columns (AUG 2025 - DEC 2026)
+            monthly_columns = ['AUG2025', 'SEP2025', 'OCT2025', 'NOV2025', 'DEC2025', 'JAN2026', 'FEB2026', 'MAR2026', 'APR2026', 'MAY2026', 'JUN2026', 'JUL2026', 'AUG2026', 'SEP2026', 'OCT2026', 'NOV2026', 'DEC2026']
+            amount_columns = ['AUG2025_AMT', 'SEP2025_AMT', 'OCT2025_AMT', 'NOV2025_AMT', 'DEC2025_AMT', 'JAN2026_AMT', 'FEB2026_AMT', 'MAR2026_AMT', 'APR2026_AMT', 'MAY2026_AMT', 'JUN2026_AMT', 'JUL2026_AMT', 'AUG2026_AMT', 'SEP2026_AMT', 'OCT2026_AMT', 'NOV2026_AMT', 'DEC2026_AMT']
+            
+            has_monthly_data = any(col in entered_on_data.columns for col in monthly_columns)
+            has_amount_data = any(col in entered_on_data.columns for col in amount_columns)
+            
+            if has_monthly_data or has_amount_data:
+                matrix_type = st.selectbox("Select Matrix Type", ["Nights", "Revenue", "Both"], key="matrix_type")
+                
+                # Prepare data based on unique reservations
+                if 'RESV_ID' in entered_on_data.columns:
+                    matrix_data = entered_on_data.drop_duplicates(subset=['RESV_ID'])
+                else:
+                    matrix_data = entered_on_data.drop_duplicates(subset=['FULL_NAME'])
+                
+                if matrix_type == "Nights" and has_monthly_data:
+                    available_nights_cols = [col for col in monthly_columns if col in matrix_data.columns]
+                    if available_nights_cols:
+                        nights_matrix = matrix_data[['COMPANY_CLEAN'] + available_nights_cols].groupby('COMPANY_CLEAN').sum()
+                        nights_matrix = nights_matrix.loc[(nights_matrix != 0).any(axis=1)]  # Remove rows with all zeros
+                        nights_matrix = nights_matrix.head(15)  # Show top 15 companies
+                        
+                        st.markdown("**Room Nights by Company and Month:**")
+                        st.dataframe(nights_matrix, use_container_width=True)
+                        
+                        # Create a heatmap for nights
+                        try:
+                            import plotly.express as px
+                            fig = px.imshow(nights_matrix.values, 
+                                          x=nights_matrix.columns, 
+                                          y=nights_matrix.index,
+                                          color_continuous_scale='Blues',
+                                          title="Room Nights Heatmap",
+                                          aspect='auto')
+                            fig.update_layout(height=500)
+                            st.plotly_chart(fig, use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Could not create heatmap: {e}")
+                
+                elif matrix_type == "Revenue" and has_amount_data:
+                    available_amount_cols = [col for col in amount_columns if col in matrix_data.columns]
+                    if available_amount_cols:
+                        amount_matrix = matrix_data[['COMPANY_CLEAN'] + available_amount_cols].groupby('COMPANY_CLEAN').sum()
+                        amount_matrix = amount_matrix.loc[(amount_matrix != 0).any(axis=1)]  # Remove rows with all zeros
+                        amount_matrix = amount_matrix.head(15)  # Show top 15 companies
+                        
+                        # Format for display (with AED labels)
+                        display_matrix = amount_matrix.copy()
+                        for col in display_matrix.columns:
+                            display_matrix[col] = display_matrix[col].apply(lambda x: f"AED {x:,.0f}" if x != 0 else "")
+                        
+                        st.markdown("**Revenue by Company and Month:**")
+                        st.dataframe(display_matrix, use_container_width=True)
+                        
+                        # Create a heatmap for revenue
+                        try:
+                            import plotly.express as px
+                            fig = px.imshow(amount_matrix.values, 
+                                          x=amount_matrix.columns, 
+                                          y=amount_matrix.index,
+                                          color_continuous_scale='Greens',
+                                          title="Revenue Heatmap (AED)",
+                                          aspect='auto')
+                            fig.update_layout(height=500)
+                            st.plotly_chart(fig, use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Could not create revenue heatmap: {e}")
+                
+                elif matrix_type == "Both" and has_monthly_data and has_amount_data:
+                    available_nights_cols = [col for col in monthly_columns if col in matrix_data.columns]
+                    available_amount_cols = [col for col in amount_columns if col in matrix_data.columns]
+                    
+                    if available_nights_cols and available_amount_cols:
+                        combined_data = matrix_data[['COMPANY_CLEAN'] + available_nights_cols + available_amount_cols].groupby('COMPANY_CLEAN').sum()
+                        combined_data = combined_data.loc[(combined_data != 0).any(axis=1)].head(10)  # Top 10 for both views
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown("**Nights Matrix:**")
+                            nights_display = combined_data[available_nights_cols]
+                            st.dataframe(nights_display, use_container_width=True)
+                        
+                        with col2:
+                            st.markdown("**Revenue Matrix:**")
+                            amount_display = combined_data[available_amount_cols].copy()
+                            for col in amount_display.columns:
+                                amount_display[col] = amount_display[col].apply(lambda x: f"AED {x:,.0f}" if x != 0 else "")
+                            st.dataframe(amount_display, use_container_width=True)
+            else:
+                st.info("📋 Monthly matrix data not available. This requires processing with the updated converter.")
             
             # 19. Enhanced Calendar Heatmap - Top 10 Companies by Booked Nights
-            st.markdown("### 🔥 Interactive Calendar Heatmap - Top 10 Companies by Booked Nights")
+            st.markdown(f"### 🔥 Interactive Calendar Heatmap for {month_label} - Top 10 Companies by Booked Nights")
             if 'COMPANY_CLEAN' in entered_on_data.columns and 'ARRIVAL' in entered_on_data.columns:
                 try:
                     import plotly.express as px
@@ -3441,7 +3874,13 @@ def entered_on_arrivals_tab():
                 total_reservations = len(entered_on_data)
                 st.metric("Total Reservations", f"{total_reservations:,}")
             with col2:
-                total_revenue = entered_on_data['AMOUNT_IN_MONTH'].sum()
+                # Calculate total revenue from monthly columns
+                if available_amount_cols:
+                    total_revenue = entered_on_data[available_amount_cols].sum().sum()
+                elif 'AMOUNT_IN_MONTH' in entered_on_data.columns:
+                    total_revenue = entered_on_data['AMOUNT_IN_MONTH'].sum()
+                else:
+                    total_revenue = entered_on_data['AMOUNT'].sum()
                 st.metric("Total Revenue", f"AED {total_revenue:,.2f}")
             with col3:
                 avg_adr = entered_on_data['ADR_IN_MONTH'].mean()
@@ -3488,9 +3927,14 @@ def entered_on_arrivals_tab():
             
             st.markdown(f"### 📊 Filtered Data View ({len(filtered_data):,} reservations)")
             
-            # Display columns selector
+            # Display columns selector - use formatted date columns if available
             all_columns = filtered_data.columns.tolist()
-            key_columns = ['FULL_NAME', 'ARRIVAL', 'DEPARTURE', 'NIGHTS', 'AMOUNT', 'ADR_IN_MONTH', 
+            
+            # Prefer formatted date columns for display
+            arrival_col = 'ARRIVAL_FORMATTED' if 'ARRIVAL_FORMATTED' in all_columns else 'ARRIVAL'
+            departure_col = 'DEPARTURE_FORMATTED' if 'DEPARTURE_FORMATTED' in all_columns else 'DEPARTURE'
+            
+            key_columns = ['FULL_NAME', arrival_col, departure_col, 'NIGHTS', 'AMOUNT', 'ADR_IN_MONTH', 
                           'COMPANY_CLEAN', 'SEASON', 'SHORT_RESV_STATUS', 'ROOM', 'SPLIT_MONTH']
             available_key_columns = [col for col in key_columns if col in all_columns]
             
@@ -3505,37 +3949,73 @@ def entered_on_arrivals_tab():
             if not selected_columns:
                 selected_columns = available_key_columns
             
+            # Prepare data for display with proper conditional formatting
+            display_data = filtered_data[selected_columns].copy()
+            
+            # Keep original data for conditional formatting logic
+            original_data = display_data.copy()
+            
             # Conditional formatting function
             def highlight_reservations(row):
-                """Apply conditional formatting to reservations"""
+                """Apply conditional formatting to reservations using original numeric values"""
                 styles = [''] * len(row)
                 
+                # Get corresponding original row for numeric comparisons
+                row_idx = row.name
+                orig_row = original_data.loc[row_idx] if row_idx in original_data.index else row
+                
                 # Highlight long bookings (>10 nights)
-                if 'NIGHTS' in row.index and pd.notna(row['NIGHTS']) and row['NIGHTS'] > 10:
-                    nights_idx = row.index.get_loc('NIGHTS')
-                    styles[nights_idx] = 'background-color: #ffcccc; font-weight: bold;'  # Light red
+                if 'NIGHTS' in orig_row.index and pd.notna(orig_row['NIGHTS']):
+                    try:
+                        nights_val = float(orig_row['NIGHTS'])
+                        if nights_val > 10:
+                            nights_idx = row.index.get_loc('NIGHTS') if 'NIGHTS' in row.index else None
+                            if nights_idx is not None:
+                                styles[nights_idx] = 'background-color: #ffcccc; font-weight: bold;'  # Light red
+                    except (ValueError, TypeError):
+                        pass
                 
                 # Highlight high ADR (>400 AED)
-                if 'ADR_IN_MONTH' in row.index and pd.notna(row['ADR_IN_MONTH']) and row['ADR_IN_MONTH'] > 400:
-                    adr_idx = row.index.get_loc('ADR_IN_MONTH')
-                    styles[adr_idx] = 'background-color: #ccffcc; font-weight: bold;'  # Light green
+                if 'ADR_IN_MONTH' in orig_row.index and pd.notna(orig_row['ADR_IN_MONTH']):
+                    try:
+                        adr_val = float(str(orig_row['ADR_IN_MONTH']).replace('AED ', '').replace(',', ''))
+                        if adr_val > 400:
+                            adr_idx = row.index.get_loc('ADR_IN_MONTH') if 'ADR_IN_MONTH' in row.index else None
+                            if adr_idx is not None:
+                                styles[adr_idx] = 'background-color: #ccffcc; font-weight: bold;'  # Light green
+                    except (ValueError, TypeError):
+                        pass
                 
                 # Highlight cancelled bookings
-                if 'SHORT_RESV_STATUS' in row.index and pd.notna(row['SHORT_RESV_STATUS']) and 'CXL' in str(row['SHORT_RESV_STATUS']):
-                    status_idx = row.index.get_loc('SHORT_RESV_STATUS')
-                    styles[status_idx] = 'background-color: #ffffcc; font-weight: bold;'  # Light yellow
+                if 'SHORT_RESV_STATUS' in orig_row.index and pd.notna(orig_row['SHORT_RESV_STATUS']):
+                    if 'CXL' in str(orig_row['SHORT_RESV_STATUS']).upper():
+                        status_idx = row.index.get_loc('SHORT_RESV_STATUS') if 'SHORT_RESV_STATUS' in row.index else None
+                        if status_idx is not None:
+                            styles[status_idx] = 'background-color: #ffffcc; font-weight: bold;'  # Light yellow
                 
                 # Highlight winter season
-                if 'SEASON' in row.index and pd.notna(row['SEASON']) and row['SEASON'] == 'Winter':
-                    season_idx = row.index.get_loc('SEASON')
-                    styles[season_idx] = 'background-color: #e6f3ff; font-weight: bold;'  # Light blue
+                if 'SEASON' in orig_row.index and pd.notna(orig_row['SEASON']):
+                    if str(orig_row['SEASON']).lower() == 'winter':
+                        season_idx = row.index.get_loc('SEASON') if 'SEASON' in row.index else None
+                        if season_idx is not None:
+                            styles[season_idx] = 'background-color: #e6f3ff; font-weight: bold;'  # Light blue
+                
+                # Highlight high amounts (>5000 AED)
+                amount_cols_to_check = ['AMOUNT', 'AMOUNT_IN_MONTH', 'AUG2025_AMT', 'SEP2025_AMT', 'OCT2025_AMT', 'NOV2025_AMT', 'DEC2025_AMT', 'JAN2026_AMT', 'FEB2026_AMT', 'MAR2026_AMT', 'APR2026_AMT', 'MAY2026_AMT', 'JUN2026_AMT', 'JUL2026_AMT', 'AUG2026_AMT', 'SEP2026_AMT', 'OCT2026_AMT', 'NOV2026_AMT', 'DEC2026_AMT']
+                for amount_col in amount_cols_to_check:
+                    if amount_col in orig_row.index and pd.notna(orig_row[amount_col]):
+                        try:
+                            amount_val = float(str(orig_row[amount_col]).replace('AED ', '').replace(',', ''))
+                            if amount_val > 5000:
+                                amount_idx = row.index.get_loc(amount_col) if amount_col in row.index else None
+                                if amount_idx is not None:
+                                    styles[amount_idx] = 'background-color: #f0e6ff; font-weight: bold;'  # Light purple
+                        except (ValueError, TypeError):
+                            pass
                 
                 return styles
             
-            # Display data with conditional formatting
-            display_data = filtered_data[selected_columns].copy()
-            
-            # Format numeric columns for better display
+            # Format numeric columns for better display AFTER conditional formatting setup
             if 'AMOUNT' in display_data.columns:
                 display_data['AMOUNT'] = display_data['AMOUNT'].apply(lambda x: f"AED {x:,.2f}" if pd.notna(x) else "")
             if 'ADR_IN_MONTH' in display_data.columns:
@@ -3543,25 +4023,38 @@ def entered_on_arrivals_tab():
             if 'AMOUNT_IN_MONTH' in display_data.columns:
                 display_data['AMOUNT_IN_MONTH'] = display_data['AMOUNT_IN_MONTH'].apply(lambda x: f"AED {x:,.2f}" if pd.notna(x) else "")
             
+            # Format monthly amount columns
+            amount_columns = ['AUG2025_AMT', 'SEP2025_AMT', 'OCT2025_AMT', 'NOV2025_AMT', 'DEC2025_AMT', 'JAN2026_AMT', 'FEB2026_AMT', 'MAR2026_AMT', 'APR2026_AMT', 'MAY2026_AMT', 'JUN2026_AMT', 'JUL2026_AMT', 'AUG2026_AMT', 'SEP2026_AMT', 'OCT2026_AMT', 'NOV2026_AMT', 'DEC2026_AMT']
+            for amount_col in amount_columns:
+                if amount_col in display_data.columns:
+                    display_data[amount_col] = display_data[amount_col].apply(lambda x: f"AED {x:,.2f}" if pd.notna(x) and x != 0 else "")
+            
             try:
                 # Apply conditional formatting
                 styled_data = display_data.style.apply(highlight_reservations, axis=1)
                 st.dataframe(styled_data, use_container_width=True, height=600)
-            except:
+                
+                # Show formatting success indicator
+                st.success("✅ Conditional formatting applied successfully!")
+                
+            except Exception as e:
                 # Fallback without styling if there are issues
+                st.warning(f"⚠️ Conditional formatting failed: {str(e)}")
                 st.dataframe(display_data, use_container_width=True, height=600)
             
             # Formatting legend
             st.markdown("#### 🎨 Conditional Formatting Legend:")
-            legend_cols = st.columns(4)
+            legend_cols = st.columns(5)
             with legend_cols[0]:
-                st.markdown('<div style="background-color: #ffcccc; padding: 5px; border-radius: 3px;">🔴 Long Bookings (>10 nights)</div>', unsafe_allow_html=True)
+                st.markdown('<div style="background-color: #ffcccc; padding: 5px; border-radius: 3px; margin: 2px;">🔴 Long Bookings (>10 nights)</div>', unsafe_allow_html=True)
             with legend_cols[1]:
-                st.markdown('<div style="background-color: #ccffcc; padding: 5px; border-radius: 3px;">🟢 High ADR (>400 AED)</div>', unsafe_allow_html=True)
+                st.markdown('<div style="background-color: #ccffcc; padding: 5px; border-radius: 3px; margin: 2px;">🟢 High ADR (>400 AED)</div>', unsafe_allow_html=True)
             with legend_cols[2]:
-                st.markdown('<div style="background-color: #ffffcc; padding: 5px; border-radius: 3px;">🟡 Cancelled Bookings</div>', unsafe_allow_html=True)
+                st.markdown('<div style="background-color: #ffffcc; padding: 5px; border-radius: 3px; margin: 2px;">🟡 Cancelled Bookings</div>', unsafe_allow_html=True)
             with legend_cols[3]:
-                st.markdown('<div style="background-color: #e6f3ff; padding: 5px; border-radius: 3px;">🔵 Winter Season</div>', unsafe_allow_html=True)
+                st.markdown('<div style="background-color: #e6f3ff; padding: 5px; border-radius: 3px; margin: 2px;">🔵 Winter Season</div>', unsafe_allow_html=True)
+            with legend_cols[4]:
+                st.markdown('<div style="background-color: #f0e6ff; padding: 5px; border-radius: 3px; margin: 2px;">🟣 High Amount (>5000 AED)</div>', unsafe_allow_html=True)
             
             # Export option
             st.markdown("---")
