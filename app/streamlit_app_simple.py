@@ -2973,7 +2973,6 @@ def entered_on_arrivals_tab():
     
     with entered_tab:
         st.subheader("📝 Entered On Comprehensive Analysis")
-        st.info("Upload and analyze Entered On Excel reports with automatic conversion and comprehensive EDA.")
         
         # File upload section with auto-conversion
         st.markdown("### 📁 Upload Entered On Report")
@@ -3017,7 +3016,6 @@ def entered_on_arrivals_tab():
                         success = db.ingest_entered_on_data(df)
                         
                         if success:
-                            db_status.success("✅ Data loaded to SQL database successfully!")
                             st.session_state.entered_on_data = df
                         else:
                             db_status.error("❌ Failed to load data to database")
@@ -3054,14 +3052,15 @@ def entered_on_arrivals_tab():
         
         if entered_on_data is not None and not entered_on_data.empty:
             # Show data processing info
-            st.info("ℹ️ **Data Processing Applied:** Room type 'PM' bookings and guest names containing 'room move' have been automatically filtered out. Dates are displayed in dd/mm/yyyy format.")
             
             # Month Filter Control
             st.markdown("---")
             st.subheader("📅 Month Filter")
             
-            # Get available months from the data
-            available_months = ['All Months'] + sorted(entered_on_data['SPLIT_MONTH'].unique().tolist()) if 'SPLIT_MONTH' in entered_on_data.columns else ['All Months']
+            # Get available months from the data - using monthly columns instead of SPLIT_MONTH
+            monthly_cols = ['AUG2025', 'SEP2025', 'OCT2025', 'NOV2025', 'DEC2025', 'JAN2026', 'FEB2026', 'MAR2026', 'APR2026', 'MAY2026', 'JUN2026', 'JUL2026', 'AUG2026', 'SEP2026', 'OCT2026', 'NOV2026', 'DEC2026']
+            existing_monthly_cols = [col for col in monthly_cols if col in entered_on_data.columns and entered_on_data[col].sum() > 0]
+            available_months = ['All Months'] + [col.replace('2025', ' 2025').replace('2026', ' 2026') for col in existing_monthly_cols]
             
             col1, col2 = st.columns([1, 2])
             with col1:
@@ -3074,8 +3073,15 @@ def entered_on_arrivals_tab():
             
             with col2:
                 if selected_month != 'All Months':
-                    month_data = entered_on_data[entered_on_data['SPLIT_MONTH'] == selected_month]
-                    st.info(f"📊 Showing data for **{selected_month}** - {len(month_data)} records")
+                    # Convert display month back to column format (e.g., "AUG 2025" -> "AUG2025")
+                    selected_col = selected_month.replace(' ', '')
+                    if selected_col in entered_on_data.columns:
+                        # Show all bookings that have nights in this month (column > 0)
+                        month_data = entered_on_data[entered_on_data[selected_col] > 0]
+                        st.info(f"📊 Showing data for **{selected_month}** - {len(month_data)} bookings with nights in this month")
+                    else:
+                        month_data = entered_on_data
+                        st.warning(f"Month column {selected_col} not found, showing all data")
                 else:
                     month_data = entered_on_data
                     st.info(f"📊 Showing data for **All Months** - {len(month_data)} records")
@@ -3199,41 +3205,6 @@ def entered_on_arrivals_tab():
             """
             st.markdown(kpi_html, unsafe_allow_html=True)
             
-            st.markdown(f"#### 📋 Original Booking Totals for {month_label} (Full Stay Duration)")
-            
-            # Original Booking KPIs
-            original_kpi_html = f"""
-            <div style="display: flex; justify-content: space-between; gap: 10px;">
-                <div class="small-kpi" style="background-color: #f0f8ff;">
-                    <div class="label">Total Bookings</div>
-                    <div class="value">{total_bookings:,}</div>
-                </div>
-                <div class="small-kpi" style="background-color: #f0f8ff;">
-                    <div class="label">Original Amount</div>
-                    <div class="value">AED {original_amount:,.2f}</div>
-                </div>
-                <div class="small-kpi" style="background-color: #f0f8ff;">
-                    <div class="label">Original Nights</div>
-                    <div class="value">{int(original_nights):,}</div>
-                </div>
-                <div class="small-kpi" style="background-color: #f0f8ff;">
-                    <div class="label">Original ADR</div>
-                    <div class="value">AED {original_adr:.2f}</div>
-                </div>
-                <div class="small-kpi" style="background-color: #f0f8ff;">
-                    <div class="label">Difference</div>
-                    <div class="value">+{original_nights - split_nights:.0f} nights</div>
-                </div>
-            </div>
-            """
-            st.markdown(kpi_html, unsafe_allow_html=True)
-            st.markdown(original_kpi_html, unsafe_allow_html=True)
-            
-            # Add explanation
-            if selected_month != 'All Months':
-                st.info(f"ℹ️ **Split vs Original for {selected_month}:** Split metrics show only the portion allocated to {selected_month}. Original metrics show the full booking amounts for bookings that have nights in {selected_month}. Long-stay bookings are automatically split across months proportionally.")
-            else:
-                st.info("ℹ️ **Split vs Original:** Split metrics show the combined allocation across all months. Original metrics show the full booking amounts before month splitting. Long-stay bookings are automatically split across months proportionally.")
             
             # 7. Top Companies Analysis (AMOUNT multiplied by 1.1 in converter)
             st.markdown(f"### 🏢 Top Companies by Amount for {month_label} (with 1.1x multiplier)")
@@ -3339,7 +3310,7 @@ def entered_on_arrivals_tab():
                 if not events_data.empty:
                     events_summary = events_data.groupby('EVENTS_DATES').agg({
                         'RESV_ID': 'count',
-                        'NIGHTS_IN_MONTH': 'sum',
+                        'NIGHTS': 'sum',
                         'ADR': 'mean'
                     }).round(2)
                     events_summary.columns = ['Bookings', 'Nights', 'Average ADR']
@@ -3560,7 +3531,7 @@ def entered_on_arrivals_tab():
             st.markdown(f"### 🏢📅 Top 5 Companies Analysis for {month_label}")
             if 'COMPANY_CLEAN' in entered_on_data.columns and 'SPLIT_MONTH' in entered_on_data.columns:
                 # Get top 5 companies by total nights
-                top_5_companies = entered_on_data.groupby('COMPANY_CLEAN')['NIGHTS_IN_MONTH'].sum().nlargest(5).index
+                top_5_companies = entered_on_data.groupby('COMPANY_CLEAN')['NIGHTS'].sum().nlargest(5).index
                 
                 # Filter data for top 5 companies
                 top_company_data = entered_on_data[entered_on_data['COMPANY_CLEAN'].isin(top_5_companies)]
@@ -3850,7 +3821,7 @@ def entered_on_arrivals_tab():
                 avg_adr = entered_on_data['ADR'].mean()
                 st.metric("Average ADR", f"AED {avg_adr:.2f}")
             with col4:
-                avg_nights = entered_on_data['NIGHTS_IN_MONTH'].mean()
+                avg_nights = entered_on_data['NIGHTS'].mean()
                 st.metric("Avg Stay Length", f"{avg_nights:.1f} nights")
             
             st.markdown("---")
@@ -4087,8 +4058,7 @@ def entered_on_arrivals_tab():
                             success = db.ingest_arrivals_data(df)
                             
                             if success:
-                                db_status.success("✅ Data loaded to SQL database successfully!")
-                            else:
+                                else:
                                 db_status.error("❌ Failed to load data to database")
                         except Exception as e:
                             db_status.warning(f"⚠️ Database storage not available: {str(e)}")
