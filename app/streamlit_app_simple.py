@@ -381,16 +381,79 @@ def dashboard_tab():
     """Dashboard tab for data processing"""
     st.header("📊 Dashboard")
     
-    # File upload section
-    uploaded_file = st.file_uploader(
-        "Choose MHR Excel file",
-        type=['xlsm', 'xlsx'],
-        help="Upload an MHR Pick Up Report with DPR sheet",
-        key="main_dashboard_upload"
-    )
+    # File selection method
+    st.subheader("📁 File Selection")
+    
+    # Tabs for different file selection methods
+    upload_tab, path_tab = st.tabs(["📤 Upload File", "📂 Select from Path"])
+    
+    uploaded_file = None
+    selected_file_path = None
+    
+    with upload_tab:
+        # File upload section
+        uploaded_file = st.file_uploader(
+            "Choose MHR Excel file",
+            type=['xlsm', 'xlsx'],
+            help="Upload an MHR Pick Up Report with DPR sheet",
+            key="main_dashboard_upload"
+        )
+    
+    with path_tab:
+        # File path section
+        st.markdown("**Browse from specific folder:**")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            default_path = r"P:\Revenue\PickupReport\New folder\2025\08 Aug"
+            file_path = st.text_input(
+                "Folder Path", 
+                value=default_path,
+                help="Enter the path to the folder containing MHR Pick Up Report files"
+            )
+        
+        with col2:
+            st.write("")  # Empty space for alignment
+            st.write("")  # Empty space for alignment
+            if st.button("🔍 Load Latest File", type="primary"):
+                if os.path.exists(file_path):
+                    try:
+                        # Search for files matching the pattern
+                        pattern = "$$$ MHR Pick Up Report 2025 $$$"
+                        matching_files = []
+                        
+                        for file in os.listdir(file_path):
+                            if (pattern in file and 
+                                file.endswith('.xlsm') and 
+                                os.path.isfile(os.path.join(file_path, file))):
+                                full_path = os.path.join(file_path, file)
+                                mod_time = os.path.getmtime(full_path)
+                                matching_files.append((full_path, mod_time, file))
+                        
+                        if matching_files:
+                            # Sort by modification time (newest first)
+                            matching_files.sort(key=lambda x: x[1], reverse=True)
+                            latest_file = matching_files[0]
+                            selected_file_path = latest_file[0]
+                            st.session_state.selected_file_path = selected_file_path
+                            st.success(f"✅ Found latest file: {latest_file[2]}")
+                            st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                        else:
+                            st.error(f"❌ No files matching pattern '{pattern}' found in {file_path}")
+                    except Exception as e:
+                        st.error(f"❌ Error accessing path: {str(e)}")
+                else:
+                    st.error(f"❌ Path does not exist: {file_path}")
+        
+        # Show selected file if any
+        if hasattr(st.session_state, 'selected_file_path') and st.session_state.selected_file_path:
+            st.success(f"📄 Selected file: {os.path.basename(st.session_state.selected_file_path)}")
+            selected_file_path = st.session_state.selected_file_path
     
     # Determine which file to process
     file_to_process = None
+    
+    # Handle uploaded file
     if uploaded_file is not None:
         # Clean up any previous uploaded files
         for old_file in project_root.glob("uploaded_*"):
@@ -409,13 +472,32 @@ def dashboard_tab():
         file_to_process = persistent_path
         
         # Auto-trigger processing with loading indicator
-        with st.spinner("Processing file..."):
+        with st.spinner("Processing uploaded file..."):
             success = run_conversion_process(file_to_process)
         
         if success:
             st.success("✅ Conversion completed successfully!")
         else:
             st.error("❌ Processing failed")
+    
+    # Handle selected file path
+    elif selected_file_path is not None:
+        file_to_process = Path(selected_file_path)
+        
+        # Add process button for path-selected files
+        if st.button("🚀 Process Selected File", type="primary"):
+            if file_to_process.exists():
+                # Auto-trigger processing with loading indicator
+                with st.spinner(f"Processing {file_to_process.name}..."):
+                    success = run_conversion_process(file_to_process)
+                
+                if success:
+                    st.success("✅ Conversion completed successfully!")
+                    st.rerun()  # Refresh to show loaded data
+                else:
+                    st.error("❌ Processing failed")
+            else:
+                st.error("❌ Selected file no longer exists")
     
     # Try to load existing data if not already loaded
     if not st.session_state.data_loaded:
