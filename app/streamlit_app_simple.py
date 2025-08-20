@@ -187,6 +187,7 @@ def display_pickup_report_header():
     """Display the pickup report header with extracted date"""
     # Header removed - date only shown in navigation panel
     pass
+
 if 'last_run_timestamp' not in st.session_state:
     st.session_state.last_run_timestamp = None
 if 'current_tab' not in st.session_state:
@@ -1518,6 +1519,7 @@ def segment_analysis_tab():
     with analysis_tab:
         st.subheader("📊 Revenue Analysis")
         
+        # Check if data is loaded
         if not st.session_state.data_loaded:
             show_loading_requirements()
             return
@@ -1530,61 +1532,61 @@ def segment_analysis_tab():
                 db = get_database()
                 df = db.get_segment_data()
             else:
-                df = pd.DataFrame()  # Empty dataframe if no database
+                df = pd.DataFrame()
         
         if df.empty:
-            st.error("No segment data available")
+            st.error("No segment data available for revenue analysis")
             return
         
         # Ensure Month column is datetime
         if 'Month' in df.columns:
             df['Month'] = pd.to_datetime(df['Month'], errors='coerce')
-            df = df.dropna(subset=['Month'])  # Remove rows with invalid dates
+            df = df.dropna(subset=['Month'])
         
-        # Controls
-        st.subheader("📊 Analysis Controls")
-        col1, col2, col3 = st.columns(3)
+        # Top-level filters
+        st.markdown("### 🎛️ Analysis Filters")
+        filter_col1, filter_col2, filter_col3 = st.columns(3)
         
-        with col1:
-            # Aggregation selector
-            aggregation = st.selectbox(
-                "Aggregation Level:",
-                ["Monthly", "Weekly", "Daily"],
-                index=0
+        with filter_col1:
+            # Segment type toggle
+            segment_type = st.radio(
+                "Segment Type:",
+                ["Merged Segments (6)", "Unmerged Segments (15)"],
+                index=0,
+                help="Choose between merged segments or individual segments"
             )
+            use_merged = segment_type.startswith("Merged")
         
-        with col2:
-            # Segment type selector
-            use_merged = st.checkbox(
-                "Use Merged Segments",
-                value=True,
-                help="Use grouped segments (Retail, Corporate, etc.) vs original segments"
-            )
-        
-        with col3:
-            # Date range
+        with filter_col2:
+            # Month filter
             if 'Month' in df.columns and len(df) > 0:
-                min_date = df['Month'].min().date()
-                max_date = df['Month'].max().date()
-                date_range = st.date_input(
-                    "Date Range:",
-                    value=(min_date, max_date),
-                    min_value=min_date,
-                    max_value=max_date
+                available_months = sorted(df['Month'].dt.to_period('M').unique())
+                selected_months = st.multiselect(
+                    "Select Months:",
+                    options=available_months,
+                    default=available_months[-6:] if len(available_months) >= 6 else available_months,
+                    format_func=lambda x: str(x)
                 )
-                if len(date_range) == 2:
-                    start_date, end_date = date_range
-                else:
-                    start_date, end_date = min_date, max_date
             else:
-                start_date = end_date = datetime.now().date()
-    
-        # Filter data by date range
-        if 'Month' in df.columns:
-            mask = (df['Month'].dt.date >= start_date) & (df['Month'].dt.date <= end_date)
-            filtered_df = df[mask]
-        else:
-            filtered_df = df
+                selected_months = []
+        
+        with filter_col3:
+            # Analysis granularity
+            granularity = st.selectbox(
+                "Analysis Granularity:",
+                ["Monthly", "Quarterly", "All Data"],
+                index=0,
+                help="Choose the level of data aggregation"
+            )
+        
+        # Filter data based on selections
+        filtered_df = df.copy()
+        if selected_months:
+            filtered_df = filtered_df[filtered_df['Month'].dt.to_period('M').isin(selected_months)]
+        
+        if filtered_df.empty:
+            st.warning("No data available for selected filters")
+            return
         
         # Choose segment column
         segment_col = 'MergedSegment' if use_merged and 'MergedSegment' in filtered_df.columns else 'Segment'
@@ -1593,40 +1595,425 @@ def segment_analysis_tab():
             st.error(f"Segment column '{segment_col}' not found in data")
             return
         
-        # Key metrics
-        st.subheader("📈 Key Performance Indicators")
+        # Required columns for variance analysis
+        required_columns = [
+            'Business_on_the_Books_Revenue',
+            'Full_Month_Last_Year_Revenue',
+            'Budget_This_Year_Revenue',
+            'Business_on_the_Books_Same_Time_Last_Year_Revenue'
+        ]
         
-        if 'Business_on_the_Books_Revenue' in filtered_df.columns:
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                total_revenue = filtered_df['Business_on_the_Books_Revenue'].sum()
-                st.metric("Total BOB Revenue (AED)", f"{total_revenue:,.0f}")
-            
-            with col2:
-                avg_revenue = filtered_df['Business_on_the_Books_Revenue'].mean()
-                st.metric("Average BOB Revenue (AED)", f"{avg_revenue:,.0f}")
-            
-            with col3:
-                segments_count = filtered_df[segment_col].nunique()
-                st.metric("Active Segments", segments_count)
-            
-            with col4:
-                if 'Business_on_the_Books_Rooms' in filtered_df.columns:
-                    total_rooms = filtered_df['Business_on_the_Books_Rooms'].sum()
-                    st.metric("Total BOB Rooms", f"{total_rooms:,.0f}")
+        missing_columns = [col for col in required_columns if col not in filtered_df.columns]
+        if missing_columns:
+            st.error(f"Missing required columns for variance analysis: {missing_columns}")
+            return
         
-        # Top 5 segments by revenue
-        st.subheader("🏆 Top 5 Segments by Revenue")
+        # Convert revenue columns to numeric
+        for col in required_columns:
+            filtered_df[col] = pd.to_numeric(filtered_df[col], errors='coerce').fillna(0)
         
-        if 'Business_on_the_Books_Revenue' in filtered_df.columns:
-            top_segments = filtered_df.groupby(segment_col)['Business_on_the_Books_Revenue'].sum().sort_values(ascending=False).head(5)
+        # Aggregate data based on granularity
+        if granularity == "Quarterly":
+            filtered_df['Period'] = filtered_df['Month'].dt.to_period('Q')
+            agg_df = filtered_df.groupby([segment_col, 'Period'])[required_columns].sum().reset_index()
+        elif granularity == "All Data":
+            agg_df = filtered_df.groupby(segment_col)[required_columns].sum().reset_index()
+            agg_df['Period'] = 'All Data'
+        else:  # Monthly
+            agg_df = filtered_df.copy()
+            agg_df['Period'] = agg_df['Month'].dt.to_period('M')
+        
+        # Function to create conditional formatting for variance tables
+        def style_variance_table(df, variance_col='Variance_%', variance_aed_col='Variance (AED)'):
+            """Apply conditional formatting to variance columns"""
+            def color_variance(val):
+                try:
+                    if pd.isna(val):
+                        return 'color: gray'
+                    val_num = float(str(val).replace('%', '').replace('AED', '').replace(',', '').strip())
+                    if val_num > 0:
+                        return 'color: green; font-weight: bold'
+                    elif val_num < 0:
+                        return 'color: red; font-weight: bold'
+                    else:
+                        return 'color: black'
+                except:
+                    return 'color: black'
             
-            # Simple table display
-            top_segments_df = top_segments.reset_index()
-            top_segments_df.columns = ['Segment', 'Revenue']
-            top_segments_df['Revenue'] = top_segments_df['Revenue'].apply(lambda x: f"AED {x:,.0f}")
-            st.dataframe(top_segments_df, use_container_width=True, hide_index=True)
+            # Apply formatting to both variance columns
+            styled_df = df.style.applymap(color_variance, subset=[variance_col])
+            if variance_aed_col in df.columns:
+                styled_df = styled_df.applymap(color_variance, subset=[variance_aed_col])
+            return styled_df
+        
+        # Section 1: BOB vs FMLY Analysis
+        st.markdown("---")
+        st.markdown("### 📊 Variance Analysis - BOB vs Full Month Last Year (FMLY)")
+        
+        # Calculate FMLY variance
+        fmly_analysis = agg_df.copy()
+        fmly_analysis['Variance'] = fmly_analysis['Business_on_the_Books_Revenue'] - fmly_analysis['Full_Month_Last_Year_Revenue']
+        fmly_analysis['Variance_%'] = ((fmly_analysis['Business_on_the_Books_Revenue'] - fmly_analysis['Full_Month_Last_Year_Revenue']) / fmly_analysis['Full_Month_Last_Year_Revenue']) * 100
+        fmly_analysis['Variance_%'] = fmly_analysis['Variance_%'].replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # Create summary table for FMLY
+        fmly_summary = fmly_analysis.groupby(segment_col).agg({
+            'Business_on_the_Books_Revenue': 'sum',
+            'Full_Month_Last_Year_Revenue': 'sum',
+            'Variance': 'sum'
+        }).reset_index()
+        fmly_summary['Variance_%'] = ((fmly_summary['Business_on_the_Books_Revenue'] - fmly_summary['Full_Month_Last_Year_Revenue']) / fmly_summary['Full_Month_Last_Year_Revenue']) * 100
+        fmly_summary['Variance_%'] = fmly_summary['Variance_%'].replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # KPI Dashboard for BOB vs FMLY
+        st.markdown("#### 🎯 BOB vs FMLY KPIs")
+        kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+        
+        with kpi_col1:
+            total_bob_fmly = fmly_summary['Business_on_the_Books_Revenue'].sum()
+            st.metric("Total BOB Revenue", f"AED {total_bob_fmly:,.0f}")
+        
+        with kpi_col2:
+            total_fmly = fmly_summary['Full_Month_Last_Year_Revenue'].sum()
+            st.metric("Total FMLY Revenue", f"AED {total_fmly:,.0f}")
+        
+        with kpi_col3:
+            total_variance_fmly = fmly_summary['Variance'].sum()
+            variance_color = "normal" if total_variance_fmly >= 0 else "inverse"
+            st.metric("Total Variance", f"AED {total_variance_fmly:,.0f}", 
+                     delta=f"{(total_variance_fmly/total_fmly*100):.1f}%" if total_fmly != 0 else "0.0%")
+        
+        with kpi_col4:
+            avg_variance_fmly = fmly_summary['Variance_%'].mean()
+            st.metric("Average Variance %", f"{avg_variance_fmly:.1f}%")
+        
+        # Charts for FMLY Analysis
+        chart_col1, chart_col2 = st.columns(2)
+        
+        with chart_col1:
+            # Bar chart showing BOB vs FMLY by segment
+            fig_fmly_comparison = px.bar(
+                fmly_summary,
+                x=segment_col,
+                y=['Business_on_the_Books_Revenue', 'Full_Month_Last_Year_Revenue'],
+                title='BOB vs FMLY Revenue Comparison by Segment',
+                labels={'value': 'Revenue (AED)', 'variable': 'Revenue Type'},
+                barmode='group',
+                color_discrete_map={
+                    'Business_on_the_Books_Revenue': '#1f77b4',
+                    'Full_Month_Last_Year_Revenue': '#ff7f0e'
+                }
+            )
+            fig_fmly_comparison.update_layout(xaxis_tickangle=45, height=400)
+            st.plotly_chart(fig_fmly_comparison, use_container_width=True)
+        
+        with chart_col2:
+            # Variance heatmap/bar chart
+            fig_fmly_variance = px.bar(
+                fmly_summary,
+                x=segment_col,
+                y='Variance_%',
+                title='FMLY Variance % by Segment',
+                labels={'Variance_%': 'Variance %'},
+                color='Variance_%',
+                color_continuous_scale=['red', 'white', 'green'],
+                color_continuous_midpoint=0
+            )
+            fig_fmly_variance.update_layout(xaxis_tickangle=45, height=400)
+            st.plotly_chart(fig_fmly_variance, use_container_width=True)
+        
+        # Variance Table with enhanced conditional formatting
+        st.markdown("#### 📋 BOB vs FMLY Variance Table")
+        
+        # Format and display FMLY table
+        fmly_display = fmly_summary.copy()
+        fmly_display['Business_on_the_Books_Revenue'] = fmly_display['Business_on_the_Books_Revenue'].apply(lambda x: f"AED {x:,.0f}")
+        fmly_display['Full_Month_Last_Year_Revenue'] = fmly_display['Full_Month_Last_Year_Revenue'].apply(lambda x: f"AED {x:,.0f}")
+        fmly_display['Variance'] = fmly_display['Variance'].apply(lambda x: f"AED {x:,.0f}")
+        fmly_display['Variance_%'] = fmly_display['Variance_%'].apply(lambda x: f"{x:.1f}%")
+        fmly_display = fmly_display.rename(columns={
+            segment_col: 'Segment',
+            'Business_on_the_Books_Revenue': 'BOB Revenue',
+            'Full_Month_Last_Year_Revenue': 'FMLY Revenue',
+            'Variance': 'Variance (AED)',
+            'Variance_%': 'Variance %'
+        })
+        
+        # Apply conditional formatting and display
+        styled_fmly = style_variance_table(fmly_display, 'Variance %', 'Variance (AED)')
+        st.dataframe(styled_fmly, use_container_width=True, hide_index=True)
+        
+        # EDA for FMLY
+        fmly_col1, fmly_col2 = st.columns(2)
+        with fmly_col1:
+            # Summary statistics
+            positive_segments = len(fmly_summary[fmly_summary['Variance_%'] > 0])
+            total_segments = len(fmly_summary)
+            st.metric("Positive Performance", f"{positive_segments}/{total_segments} segments")
+            
+            # Performance distribution
+            negative_segments = total_segments - positive_segments
+            st.info(f"📈 **Performance Distribution**: {positive_segments} segments outperformed FMLY, {negative_segments} underperformed")
+        
+        with fmly_col2:
+            # Best and worst performers
+            best_performer = fmly_summary.loc[fmly_summary['Variance_%'].idxmax()]
+            worst_performer = fmly_summary.loc[fmly_summary['Variance_%'].idxmin()]
+            st.metric("Best Performer", f"{best_performer[segment_col]}", f"{best_performer['Variance_%']:.1f}%")
+            st.metric("Worst Performer", f"{worst_performer[segment_col]}", f"{worst_performer['Variance_%']:.1f}%")
+        
+        # Section 2: BOB vs Budget Analysis
+        st.markdown("---")
+        st.markdown("### 📊 Variance Analysis - BOB vs Budget")
+        
+        # Calculate Budget variance
+        budget_analysis = agg_df.copy()
+        budget_analysis['Variance'] = budget_analysis['Business_on_the_Books_Revenue'] - budget_analysis['Budget_This_Year_Revenue']
+        budget_analysis['Variance_%'] = ((budget_analysis['Business_on_the_Books_Revenue'] - budget_analysis['Budget_This_Year_Revenue']) / budget_analysis['Budget_This_Year_Revenue']) * 100
+        budget_analysis['Variance_%'] = budget_analysis['Variance_%'].replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # Create summary table for Budget
+        budget_summary = budget_analysis.groupby(segment_col).agg({
+            'Business_on_the_Books_Revenue': 'sum',
+            'Budget_This_Year_Revenue': 'sum',
+            'Variance': 'sum'
+        }).reset_index()
+        budget_summary['Variance_%'] = ((budget_summary['Business_on_the_Books_Revenue'] - budget_summary['Budget_This_Year_Revenue']) / budget_summary['Budget_This_Year_Revenue']) * 100
+        budget_summary['Variance_%'] = budget_summary['Variance_%'].replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # KPI Dashboard for BOB vs Budget
+        st.markdown("#### 🎯 BOB vs Budget KPIs")
+        kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+        
+        with kpi_col1:
+            total_bob_budget = budget_summary['Business_on_the_Books_Revenue'].sum()
+            st.metric("Total BOB Revenue", f"AED {total_bob_budget:,.0f}")
+        
+        with kpi_col2:
+            total_budget = budget_summary['Budget_This_Year_Revenue'].sum()
+            st.metric("Total Budget Revenue", f"AED {total_budget:,.0f}")
+        
+        with kpi_col3:
+            total_variance_budget = budget_summary['Variance'].sum()
+            st.metric("Total Variance", f"AED {total_variance_budget:,.0f}", 
+                     delta=f"{(total_variance_budget/total_budget*100):.1f}%" if total_budget != 0 else "0.0%")
+        
+        with kpi_col4:
+            avg_variance_budget = budget_summary['Variance_%'].mean()
+            st.metric("Average Variance %", f"{avg_variance_budget:.1f}%")
+        
+        # Charts for Budget Analysis
+        chart_col1, chart_col2 = st.columns(2)
+        
+        with chart_col1:
+            # Bar chart showing BOB vs Budget by segment
+            fig_budget_comparison = px.bar(
+                budget_summary,
+                x=segment_col,
+                y=['Business_on_the_Books_Revenue', 'Budget_This_Year_Revenue'],
+                title='BOB vs Budget Revenue Comparison by Segment',
+                labels={'value': 'Revenue (AED)', 'variable': 'Revenue Type'},
+                barmode='group',
+                color_discrete_map={
+                    'Business_on_the_Books_Revenue': '#1f77b4',
+                    'Budget_This_Year_Revenue': '#2ca02c'
+                }
+            )
+            fig_budget_comparison.update_layout(xaxis_tickangle=45, height=400)
+            st.plotly_chart(fig_budget_comparison, use_container_width=True)
+        
+        with chart_col2:
+            # Variance heatmap/bar chart
+            fig_budget_variance = px.bar(
+                budget_summary,
+                x=segment_col,
+                y='Variance_%',
+                title='Budget Variance % by Segment',
+                labels={'Variance_%': 'Variance %'},
+                color='Variance_%',
+                color_continuous_scale=['red', 'white', 'green'],
+                color_continuous_midpoint=0
+            )
+            fig_budget_variance.update_layout(xaxis_tickangle=45, height=400)
+            st.plotly_chart(fig_budget_variance, use_container_width=True)
+        
+        # Variance Table with enhanced conditional formatting
+        st.markdown("#### 📋 BOB vs Budget Variance Table")
+        
+        # Format and display Budget table
+        budget_display = budget_summary.copy()
+        budget_display['Business_on_the_Books_Revenue'] = budget_display['Business_on_the_Books_Revenue'].apply(lambda x: f"AED {x:,.0f}")
+        budget_display['Budget_This_Year_Revenue'] = budget_display['Budget_This_Year_Revenue'].apply(lambda x: f"AED {x:,.0f}")
+        budget_display['Variance'] = budget_display['Variance'].apply(lambda x: f"AED {x:,.0f}")
+        budget_display['Variance_%'] = budget_display['Variance_%'].apply(lambda x: f"{x:.1f}%")
+        budget_display = budget_display.rename(columns={
+            segment_col: 'Segment',
+            'Business_on_the_Books_Revenue': 'BOB Revenue',
+            'Budget_This_Year_Revenue': 'Budget Revenue',
+            'Variance': 'Variance (AED)',
+            'Variance_%': 'Variance %'
+        })
+        
+        # Apply conditional formatting and display
+        styled_budget = style_variance_table(budget_display, 'Variance %', 'Variance (AED)')
+        st.dataframe(styled_budget, use_container_width=True, hide_index=True)
+        
+        # EDA for Budget
+        budget_col1, budget_col2 = st.columns(2)
+        with budget_col1:
+            # Summary statistics
+            positive_segments = len(budget_summary[budget_summary['Variance_%'] > 0])
+            total_segments = len(budget_summary)
+            st.metric("Over Budget", f"{positive_segments}/{total_segments} segments")
+            
+            # Performance distribution
+            under_budget_segments = total_segments - positive_segments
+            st.info(f"💰 **Budget Performance**: {positive_segments} segments over budget, {under_budget_segments} under budget")
+        
+        with budget_col2:
+            # Best and worst performers
+            best_performer = budget_summary.loc[budget_summary['Variance_%'].idxmax()]
+            worst_performer = budget_summary.loc[budget_summary['Variance_%'].idxmin()]
+            st.metric("Best vs Budget", f"{best_performer[segment_col]}", f"{best_performer['Variance_%']:.1f}%")
+            st.metric("Worst vs Budget", f"{worst_performer[segment_col]}", f"{worst_performer['Variance_%']:.1f}%")
+        
+        # Section 3: BOB vs STLY Analysis
+        st.markdown("---")
+        st.markdown("### 📊 Variance Analysis - BOB vs Same Time Last Year (STLY)")
+        
+        # Calculate STLY variance
+        stly_analysis = agg_df.copy()
+        stly_analysis['Variance'] = stly_analysis['Business_on_the_Books_Revenue'] - stly_analysis['Business_on_the_Books_Same_Time_Last_Year_Revenue']
+        stly_analysis['Variance_%'] = ((stly_analysis['Business_on_the_Books_Revenue'] - stly_analysis['Business_on_the_Books_Same_Time_Last_Year_Revenue']) / stly_analysis['Business_on_the_Books_Same_Time_Last_Year_Revenue']) * 100
+        stly_analysis['Variance_%'] = stly_analysis['Variance_%'].replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # Create summary table for STLY
+        stly_summary = stly_analysis.groupby(segment_col).agg({
+            'Business_on_the_Books_Revenue': 'sum',
+            'Business_on_the_Books_Same_Time_Last_Year_Revenue': 'sum',
+            'Variance': 'sum'
+        }).reset_index()
+        stly_summary['Variance_%'] = ((stly_summary['Business_on_the_Books_Revenue'] - stly_summary['Business_on_the_Books_Same_Time_Last_Year_Revenue']) / stly_summary['Business_on_the_Books_Same_Time_Last_Year_Revenue']) * 100
+        stly_summary['Variance_%'] = stly_summary['Variance_%'].replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # KPI Dashboard for BOB vs STLY
+        st.markdown("#### 🎯 BOB vs STLY KPIs")
+        kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+        
+        with kpi_col1:
+            total_bob_stly = stly_summary['Business_on_the_Books_Revenue'].sum()
+            st.metric("Total BOB Revenue", f"AED {total_bob_stly:,.0f}")
+        
+        with kpi_col2:
+            total_stly = stly_summary['Business_on_the_Books_Same_Time_Last_Year_Revenue'].sum()
+            st.metric("Total STLY Revenue", f"AED {total_stly:,.0f}")
+        
+        with kpi_col3:
+            total_variance_stly = stly_summary['Variance'].sum()
+            st.metric("Total Variance", f"AED {total_variance_stly:,.0f}", 
+                     delta=f"{(total_variance_stly/total_stly*100):.1f}%" if total_stly != 0 else "0.0%")
+        
+        with kpi_col4:
+            avg_variance_stly = stly_summary['Variance_%'].mean()
+            st.metric("Average Variance %", f"{avg_variance_stly:.1f}%")
+        
+        # Charts for STLY Analysis
+        chart_col1, chart_col2 = st.columns(2)
+        
+        with chart_col1:
+            # Bar chart showing BOB vs STLY by segment
+            fig_stly_comparison = px.bar(
+                stly_summary,
+                x=segment_col,
+                y=['Business_on_the_Books_Revenue', 'Business_on_the_Books_Same_Time_Last_Year_Revenue'],
+                title='BOB vs STLY Revenue Comparison by Segment',
+                labels={'value': 'Revenue (AED)', 'variable': 'Revenue Type'},
+                barmode='group',
+                color_discrete_map={
+                    'Business_on_the_Books_Revenue': '#1f77b4',
+                    'Business_on_the_Books_Same_Time_Last_Year_Revenue': '#d62728'
+                }
+            )
+            fig_stly_comparison.update_layout(xaxis_tickangle=45, height=400)
+            st.plotly_chart(fig_stly_comparison, use_container_width=True)
+        
+        with chart_col2:
+            # Variance heatmap/bar chart
+            fig_stly_variance = px.bar(
+                stly_summary,
+                x=segment_col,
+                y='Variance_%',
+                title='STLY Variance % by Segment',
+                labels={'Variance_%': 'Variance %'},
+                color='Variance_%',
+                color_continuous_scale=['red', 'white', 'green'],
+                color_continuous_midpoint=0
+            )
+            fig_stly_variance.update_layout(xaxis_tickangle=45, height=400)
+            st.plotly_chart(fig_stly_variance, use_container_width=True)
+        
+        # Variance Table with enhanced conditional formatting
+        st.markdown("#### 📋 BOB vs STLY Variance Table")
+        
+        # Format and display STLY table
+        stly_display = stly_summary.copy()
+        stly_display['Business_on_the_Books_Revenue'] = stly_display['Business_on_the_Books_Revenue'].apply(lambda x: f"AED {x:,.0f}")
+        stly_display['Business_on_the_Books_Same_Time_Last_Year_Revenue'] = stly_display['Business_on_the_Books_Same_Time_Last_Year_Revenue'].apply(lambda x: f"AED {x:,.0f}")
+        stly_display['Variance'] = stly_display['Variance'].apply(lambda x: f"AED {x:,.0f}")
+        stly_display['Variance_%'] = stly_display['Variance_%'].apply(lambda x: f"{x:.1f}%")
+        stly_display = stly_display.rename(columns={
+            segment_col: 'Segment',
+            'Business_on_the_Books_Revenue': 'BOB Revenue',
+            'Business_on_the_Books_Same_Time_Last_Year_Revenue': 'STLY Revenue',
+            'Variance': 'Variance (AED)',
+            'Variance_%': 'Variance %'
+        })
+        
+        # Apply conditional formatting and display
+        styled_stly = style_variance_table(stly_display, 'Variance %', 'Variance (AED)')
+        st.dataframe(styled_stly, use_container_width=True, hide_index=True)
+        
+        # EDA for STLY
+        stly_col1, stly_col2 = st.columns(2)
+        with stly_col1:
+            # Summary statistics
+            positive_segments = len(stly_summary[stly_summary['Variance_%'] > 0])
+            total_segments = len(stly_summary)
+            st.metric("YoY Growth", f"{positive_segments}/{total_segments} segments")
+            
+            # Performance distribution
+            declining_segments = total_segments - positive_segments
+            st.info(f"📈 **YoY Performance**: {positive_segments} segments grew, {declining_segments} declined")
+        
+        with stly_col2:
+            # Best and worst performers
+            best_performer = stly_summary.loc[stly_summary['Variance_%'].idxmax()]
+            worst_performer = stly_summary.loc[stly_summary['Variance_%'].idxmin()]
+            st.metric("Best YoY Growth", f"{best_performer[segment_col]}", f"{best_performer['Variance_%']:.1f}%")
+            st.metric("Worst YoY Growth", f"{worst_performer[segment_col]}", f"{worst_performer['Variance_%']:.1f}%")
+        
+        # Overall EDA Summary
+        st.markdown("---")
+        st.markdown("### 📈 Overall Revenue Performance Summary")
+        
+        summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
+        
+        with summary_col1:
+            total_bob = agg_df['Business_on_the_Books_Revenue'].sum()
+            st.metric("Total BOB Revenue", f"AED {total_bob:,.0f}")
+        
+        with summary_col2:
+            segments_analyzed = len(agg_df[segment_col].unique())
+            st.metric("Segments Analyzed", f"{segments_analyzed}")
+        
+        with summary_col3:
+            months_analyzed = len(selected_months) if selected_months else len(df['Month'].dt.to_period('M').unique())
+            st.metric("Periods Analyzed", f"{months_analyzed}")
+        
+        with summary_col4:
+            # Overall performance score (average of all three variances)
+            overall_score = (fmly_summary['Variance_%'].mean() + budget_summary['Variance_%'].mean() + stly_summary['Variance_%'].mean()) / 3
+            st.metric("Overall Performance", f"{overall_score:.1f}%")
     
     with delta_tab:
         st.subheader("📈 Delta Analysis")
@@ -1655,391 +2042,114 @@ def segment_analysis_tab():
             delta_df['Month'] = pd.to_datetime(delta_df['Month'], errors='coerce')
             delta_df = delta_df.dropna(subset=['Month'])
         
-        # Delta Analysis Controls
-        st.subheader("🎛️ Analysis Controls")
-        delta_col1, delta_col2, delta_col3 = st.columns(3)
+        # Monthly Analysis Sections
+        st.markdown("---")
+        st.subheader("📅 Monthly Analysis")
         
-        with delta_col1:
-            # Segment type toggle
-            segment_type = st.radio(
-                "Segment Type:",
-                ["Merged Segments", "Unmerged Segments"],
-                index=0,
-                help="Merged: Retail, Groups | Unmerged: Managed Local, Tour, Unmanaged, Package",
-                key="delta_segment_type"
-            )
-            use_merged_delta = segment_type == "Merged Segments"
+        # Check for required columns for monthly analysis
+        required_delta_columns = [
+            'Business_on_the_Books_Revenue',
+            'Business_on_the_Books_Same_Time_Last_Year_Revenue', 
+            'Full_Month_Last_Year_Revenue',
+            'Budget_This_Year_Revenue'
+        ]
+        
+        missing_delta_columns = [col for col in required_delta_columns if col not in delta_df.columns]
+        
+        if not missing_delta_columns:
+            # Delta Analysis Controls for Monthly Analysis
+            st.subheader("🎛️ Monthly Analysis Controls")
+            monthly_col1, monthly_col2, monthly_col3 = st.columns(3)
             
-            # Show segment categories info
-            if use_merged_delta:
-                st.info("📊 **Merged**: Retail, Groups")
-            else:
-                st.info("📋 **Unmerged**: Managed Local, Tour, Unmanaged, Package")
-        
-        with delta_col2:
-            # Month filter
-            if 'Month' in delta_df.columns and len(delta_df) > 0:
-                available_months = sorted(delta_df['Month'].dt.to_period('M').unique())
-                selected_months = st.multiselect(
-                    "Select Months:",
-                    options=available_months,
-                    default=available_months[-3:] if len(available_months) >= 3 else available_months,
-                    format_func=lambda x: str(x),
-                    key="delta_month_filter"
+            with monthly_col1:
+                # Segment type toggle
+                monthly_segment_type = st.radio(
+                    "Segment Type:",
+                    ["Merged Segments", "Unmerged Segments"],
+                    index=0,
+                    help="Merged: Retail, Groups | Unmerged: Managed Local, Tour, Unmanaged, Package",
+                    key="monthly_segment_type"
                 )
-        
-        with delta_col3:
-            # Analysis type
-            analysis_granularity = st.selectbox(
-                "Granularity:",
-                ["Monthly", "Segment-wise", "Both"],
-                help="Choose analysis granularity",
-                key="delta_granularity"
-            )
-        
-        # Filter data based on selections
-        if selected_months:
-            delta_df = delta_df[delta_df['Month'].dt.to_period('M').isin(selected_months)]
-        
-        # Choose segment column
-        segment_col = 'MergedSegment' if use_merged_delta and 'MergedSegment' in delta_df.columns else 'Segment'
-        
-        if delta_df.empty:
-            st.warning("No data available for selected filters")
-            return
-        
-        # Required columns check
-        required_columns = [
-            'Business_on_the_Books_Revenue',
-            'Business_on_the_Books_Same_Time_Last_Year_Revenue', 
-            'Full_Month_Last_Year_Revenue',
-            'Budget_This_Year_Revenue'
-        ]
-        
-        missing_columns = [col for col in required_columns if col not in delta_df.columns]
-        if missing_columns:
-            st.error(f"Missing required columns for delta analysis: {missing_columns}")
-            return
-        
-        # Create delta analysis sections
-        st.markdown("---")
-        
-        # Section 1: BOB vs Same Time Last Year
-        st.subheader("📊 Section 1: Business on Books vs Same Time Last Year")
-        create_delta_comparison(
-            delta_df, 
-            'Business_on_the_Books_Revenue', 
-            'Business_on_the_Books_Same_Time_Last_Year_Revenue',
-            'BOB vs STLY',
-            segment_col,
-            analysis_granularity
-        )
-        
-        st.markdown("---")
-        
-        # Section 2: BOB vs Full Month Last Year  
-        st.subheader("📊 Section 2: Business on Books vs Full Month Last Year")
-        create_delta_comparison(
-            delta_df,
-            'Business_on_the_Books_Revenue',
-            'Full_Month_Last_Year_Revenue', 
-            'BOB vs FMLY',
-            segment_col,
-            analysis_granularity
-        )
-        
-        st.markdown("---")
-        
-        # Section 3: BOB vs Budget (Fixed variance calculation)
-        st.subheader("📊 Section 3: Business on Books vs Budget This Year")
-        create_delta_comparison(
-            delta_df,
-            'Business_on_the_Books_Revenue',
-            'Budget_This_Year_Revenue',
-            'BOB vs Budget', 
-            segment_col,
-            analysis_granularity
-        )
-        
-        # Add comprehensive individual segment analysis for all 15 segments
-        st.markdown("---")
-        st.subheader("🎯 Detailed Individual Segment Analysis")
-        
-        # Convert revenue columns to numeric if they're strings
-        revenue_columns = [
-            'Business_on_the_Books_Revenue',
-            'Business_on_the_Books_Same_Time_Last_Year_Revenue', 
-            'Full_Month_Last_Year_Revenue',
-            'Budget_This_Year_Revenue'
-        ]
-        
-        for col in revenue_columns:
-            if col in delta_df.columns:
-                if delta_df[col].dtype == 'object':  # String column
-                    delta_df[col] = pd.to_numeric(delta_df[col], errors='coerce').fillna(0)
-        
-        # Get all 15 unique segments
-        all_segments = sorted(delta_df['Segment'].unique())
-        
-        # Segment type toggle for detailed analysis
-        st.markdown("### 🔄 Segment Type Selection")
-        detail_col1, detail_col2 = st.columns(2)
-        
-        with detail_col1:
-            segment_detail_type = st.radio(
-                "Choose Analysis Type:",
-                ["All 15 Individual Segments", "Merged Segments Only"],
-                index=0,
-                help="All 15: Complete individual segment breakdown | Merged: Aggregated view",
-                key="segment_detail_type"
-            )
-        
-        with detail_col2:
-            if segment_detail_type == "All 15 Individual Segments":
-                st.info(f"📋 **Analyzing all {len(all_segments)} segments individually**")
-                segments_to_analyze = all_segments
-                analysis_segment_col = 'Segment'
-            else:
-                st.info("📊 **Analyzing merged segments only**")
-                segments_to_analyze = sorted(delta_df['MergedSegment'].unique()) if 'MergedSegment' in delta_df.columns else all_segments
-                analysis_segment_col = 'MergedSegment' if 'MergedSegment' in delta_df.columns else 'Segment'
-        
-        # Show available segments
-        with st.expander(f"📋 View All {len(segments_to_analyze)} Segments"):
-            seg_cols = st.columns(3)
-            for i, segment in enumerate(segments_to_analyze):
-                with seg_cols[i % 3]:
-                    st.write(f"{i+1:2d}. {segment}")
-        
-        # Individual segment analysis for each of the three sections
-        for section_num, (section_title, col1_name, col2_name, comparison_name) in enumerate([
-            ("Section 1: Business on Books vs Same Time Last Year", 
-             'Business_on_the_Books_Revenue', 
-             'Business_on_the_Books_Same_Time_Last_Year_Revenue', 
-             'BOB vs STLY'),
-            ("Section 2: Business on Books vs Full Month Last Year", 
-             'Business_on_the_Books_Revenue', 
-             'Full_Month_Last_Year_Revenue', 
-             'BOB vs FMLY'),
-            ("Section 3: Business on Books vs Budget This Year", 
-             'Business_on_the_Books_Revenue', 
-             'Budget_This_Year_Revenue', 
-             'BOB vs Budget')
-        ], 1):
+                use_merged_monthly = monthly_segment_type == "Merged Segments"
+                
+                # Show segment categories info
+                if use_merged_monthly:
+                    st.info("📊 **Merged**: Retail, Groups")
+                else:
+                    st.info("📋 **Unmerged**: Managed Local, Tour, Unmanaged, Package")
             
-            st.markdown(f"### 📈 {section_title} - Individual Segment Details")
+            with monthly_col2:
+                # Month filter
+                if 'Month' in delta_df.columns and len(delta_df) > 0:
+                    available_monthly_months = sorted(delta_df['Month'].dt.to_period('M').unique())
+                    selected_monthly_months = st.multiselect(
+                        "Select Months:",
+                        options=available_monthly_months,
+                        default=available_monthly_months[-3:] if len(available_monthly_months) >= 3 else available_monthly_months,
+                        format_func=lambda x: str(x),
+                        key="monthly_month_filter"
+                    )
             
-            # Create comprehensive analysis for each segment
-            segment_summary_data = []
+            with monthly_col3:
+                # Analysis type
+                monthly_analysis_granularity = st.selectbox(
+                    "Granularity:",
+                    ["Monthly", "Segment-wise", "Both"],
+                    help="Choose analysis granularity",
+                    key="monthly_granularity"
+                )
             
-            for segment in segments_to_analyze:
-                segment_data = delta_df[delta_df[analysis_segment_col] == segment]
-                
-                if not segment_data.empty:
-                    # Calculate totals for this segment
-                    col1_total = segment_data[col1_name].sum()
-                    col2_total = segment_data[col2_name].sum()
-                    variance = col1_total - col2_total
-                    variance_pct = (variance / col2_total * 100) if col2_total != 0 else 0
-                    
-                    segment_summary_data.append({
-                        'Segment': segment,
-                        col1_name: col1_total,
-                        col2_name: col2_total,
-                        'Variance': variance,
-                        'Variance_%': variance_pct,
-                        'Months_Count': len(segment_data)
-                    })
+            # Filter data for monthly analysis
+            monthly_df = delta_df.copy()
+            if selected_monthly_months:
+                monthly_df = monthly_df[monthly_df['Month'].dt.to_period('M').isin(selected_monthly_months)]
             
-            # Create summary DataFrame
-            segment_summary_df = pd.DataFrame(segment_summary_data)
+            # Choose segment column for monthly analysis
+            monthly_segment_col = 'MergedSegment' if use_merged_monthly and 'MergedSegment' in monthly_df.columns else 'Segment'
             
-            if not segment_summary_df.empty:
-                # Sort by variance percentage
-                segment_summary_df = segment_summary_df.sort_values('Variance_%', ascending=False)
-                
-                # Display comprehensive table
-                display_df = segment_summary_df.copy()
-                display_df[col1_name] = display_df[col1_name].apply(lambda x: f"AED {x:,.0f}")
-                display_df[col2_name] = display_df[col2_name].apply(lambda x: f"AED {x:,.0f}")
-                display_df['Variance'] = display_df['Variance'].apply(lambda x: f"AED {x:,.0f}")
-                display_df['Variance_%'] = display_df['Variance_%'].apply(lambda x: f"{x:.1f}%")
-                
-                # Rename columns for better display
-                display_df = display_df.rename(columns={
-                    col1_name: col1_name.replace('_', ' '),
-                    col2_name: col2_name.replace('_', ' '),
-                    'Months_Count': 'Data Points'
-                })
-                
-                st.write(f"**📊 {comparison_name} - All Segments Comparison Table:**")
-                styled_summary = style_variance_table(display_df, variance_col='Variance_%')
-                st.dataframe(styled_summary, use_container_width=True)
-                
-                # Create comprehensive charts
-                chart_row1_col1, chart_row1_col2 = st.columns(2)
-                
-                with chart_row1_col1:
-                    # Bar chart comparing the two metrics
-                    fig_comparison = go.Figure()
-                    
-                    fig_comparison.add_trace(go.Bar(
-                        x=segment_summary_df['Segment'],
-                        y=segment_summary_df[col1_name],
-                        name=col1_name.replace('_', ' '),
-                        marker_color='lightblue',
-                        opacity=0.8
-                    ))
-                    
-                    fig_comparison.add_trace(go.Bar(
-                        x=segment_summary_df['Segment'],
-                        y=segment_summary_df[col2_name],
-                        name=col2_name.replace('_', ' '),
-                        marker_color='orange',
-                        opacity=0.8
-                    ))
-                    
-                    fig_comparison.update_layout(
-                        title=f'{comparison_name} - Revenue Comparison',
-                        xaxis_title='Segment',
-                        yaxis_title='Revenue (AED)',
-                        height=500,
-                        barmode='group',
-                        hovermode='x unified',
-                        xaxis={'tickangle': 45}
-                    )
-                    
-                    st.plotly_chart(fig_comparison, use_container_width=True)
-                
-                with chart_row1_col2:
-                    # Variance percentage chart
-                    fig_variance = px.bar(
-                        segment_summary_df,
-                        x='Segment',
-                        y='Variance_%',
-                        title=f'{comparison_name} - Variance Percentage',
-                        labels={'Variance_%': 'Variance %', 'Segment': 'Segment'},
-                        color='Variance_%',
-                        color_continuous_scale=['red', 'white', 'green'],
-                        color_continuous_midpoint=0,
-                        height=500
-                    )
-                    
-                    fig_variance.update_layout(xaxis={'tickangle': 45})
-                    st.plotly_chart(fig_variance, use_container_width=True)
-                
-                # Second row of charts
-                chart_row2_col1, chart_row2_col2 = st.columns(2)
-                
-                with chart_row2_col1:
-                    # Absolute variance chart
-                    fig_abs_variance = px.bar(
-                        segment_summary_df,
-                        x='Segment',
-                        y='Variance',
-                        title=f'{comparison_name} - Absolute Variance (AED)',
-                        labels={'Variance': 'Variance (AED)', 'Segment': 'Segment'},
-                        color='Variance',
-                        color_continuous_scale=['red', 'white', 'green'],
-                        color_continuous_midpoint=0,
-                        height=400
-                    )
-                    
-                    fig_abs_variance.update_layout(xaxis={'tickangle': 45})
-                    st.plotly_chart(fig_abs_variance, use_container_width=True)
-                
-                with chart_row2_col2:
-                    # Performance ranking
-                    ranking_df = segment_summary_df.copy()
-                    ranking_df['Rank'] = ranking_df['Variance_%'].rank(ascending=False, method='dense').astype(int)
-                    ranking_df = ranking_df.sort_values('Rank')
-                    
-                    # Ensure size values are positive for scatter plot
-                    ranking_df['Size_Value'] = ranking_df[col1_name].abs() + 100
-                    
-                    fig_ranking = px.scatter(
-                        ranking_df,
-                        x='Rank',
-                        y='Variance_%',
-                        size='Size_Value',
-                        hover_data={'Segment': True, 'Variance': ':.0f'},
-                        title=f'{comparison_name} - Performance Ranking',
-                        labels={'Variance_%': 'Variance %', 'Rank': 'Performance Rank'},
-                        height=400
-                    )
-                    
-                    # Add segment labels
-                    for _, row in ranking_df.iterrows():
-                        fig_ranking.add_annotation(
-                            x=row['Rank'],
-                            y=row['Variance_%'],
-                            text=row['Segment'][:8] + "..." if len(row['Segment']) > 8 else row['Segment'],
-                            showarrow=True,
-                            arrowhead=2,
-                            arrowsize=1,
-                            arrowwidth=1,
-                            font=dict(size=8)
-                        )
-                    
-                    st.plotly_chart(fig_ranking, use_container_width=True)
-                
-                # Summary metrics for this section
-                st.markdown(f"**📈 {comparison_name} Summary Metrics:**")
-                metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
-                
-                total_col1 = segment_summary_df[col1_name].sum()
-                total_col2 = segment_summary_df[col2_name].sum()
-                total_variance = segment_summary_df['Variance'].sum()
-                avg_variance_pct = segment_summary_df['Variance_%'].mean()
-                
-                with metrics_col1:
-                    st.metric(
-                        label=col1_name.replace('_', ' '),
-                        value=f"AED {total_col1:,.0f}"
-                    )
-                
-                with metrics_col2:
-                    st.metric(
-                        label=col2_name.replace('_', ' '),
-                        value=f"AED {total_col2:,.0f}"
-                    )
-                
-                with metrics_col3:
-                    delta_color = "normal" if total_variance >= 0 else "inverse"
-                    st.metric(
-                        label="Total Variance",
-                        value=f"AED {total_variance:,.0f}",
-                        delta=f"{(total_variance/total_col2*100) if total_col2 != 0 else 0:.1f}%"
-                    )
-                
-                with metrics_col4:
-                    st.metric(
-                        label="Avg Variance %",
-                        value=f"{avg_variance_pct:.1f}%"
-                    )
-                
-                # Top and bottom performers
-                st.markdown(f"**🏆 {comparison_name} - Top & Bottom Performers:**")
-                perf_col1, perf_col2 = st.columns(2)
-                
-                with perf_col1:
-                    st.markdown("**🥇 Top 3 Performers (Highest Variance %):**")
-                    top_performers = segment_summary_df.head(3)[['Segment', 'Variance_%']].copy()
-                    top_performers['Variance_%'] = top_performers['Variance_%'].apply(lambda x: f"{x:.1f}%")
-                    st.dataframe(top_performers, hide_index=True, use_container_width=True)
-                
-                with perf_col2:
-                    st.markdown("**🥉 Bottom 3 Performers (Lowest Variance %):**")
-                    bottom_performers = segment_summary_df.tail(3)[['Segment', 'Variance_%']].copy()
-                    bottom_performers['Variance_%'] = bottom_performers['Variance_%'].apply(lambda x: f"{x:.1f}%")
-                    st.dataframe(bottom_performers, hide_index=True, use_container_width=True)
-            else:
-                st.warning(f"No data available for {comparison_name} analysis")
-            
-            # Add separator between sections
-            if section_num < 3:
+            if not monthly_df.empty:
+                # Section 1: BOB vs Same Time Last Year
                 st.markdown("---")
-    
+                st.subheader("📊 Monthly Analysis - BOB vs STLY")
+                create_delta_comparison(
+                    monthly_df, 
+                    'Business_on_the_Books_Revenue', 
+                    'Business_on_the_Books_Same_Time_Last_Year_Revenue',
+                    'BOB vs STLY',
+                    monthly_segment_col,
+                    monthly_analysis_granularity
+                )
+                
+                st.markdown("---")
+                
+                # Section 2: BOB vs Full Month Last Year  
+                st.subheader("📊 Monthly Analysis - BOB vs FMLY")
+                create_delta_comparison(
+                    monthly_df,
+                    'Business_on_the_Books_Revenue',
+                    'Full_Month_Last_Year_Revenue', 
+                    'BOB vs FMLY',
+                    monthly_segment_col,
+                    monthly_analysis_granularity
+                )
+                
+                st.markdown("---")
+                
+                # Section 3: BOB vs Budget
+                st.subheader("📊 Monthly Analysis - BOB vs Budget")
+                create_delta_comparison(
+                    monthly_df,
+                    'Business_on_the_Books_Revenue',
+                    'Budget_This_Year_Revenue',
+                    'BOB vs Budget', 
+                    monthly_segment_col,
+                    monthly_analysis_granularity
+                )
+            else:
+                st.warning("No data available for selected monthly analysis filters")
+        else:
+            st.error(f"Missing required columns for monthly analysis: {missing_delta_columns}")
+            
     with market_seg_tab:
         st.subheader("📋 MHR Market Segmentation Documentation")
         st.info("This section displays the official MHR Market Segmentation guidelines document from November 2018.")
@@ -2050,106 +2160,49 @@ def segment_analysis_tab():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("#### 🛒 **RETAIL Segments**")
-            st.markdown("""
-            - **UMLP** - Unmanaged Leisure Premium  
-            - **UMLD** - Unmanaged Leisure Discount  
-            - **PACK** - Package  
-            - **TPIM/ODIM** - Third Party Intermediary Merchant  
-            """)
-            
-            st.markdown("#### 🏢 **NEGOTIATED CORPORATE Segments**")
-            st.markdown("""
-            - **MCGL** - Managed Corporate Global  
-            - **MCLO** - Managed Corporate Local  
-            """)
-            
-            st.markdown("#### 🏛️ **GOVERNMENT Segments**")
-            st.markdown("""
-            - **GOVT** - Government  
-            """)
-        
+            st.markdown("**🛒 Retail Segments:**")
+            retail_segments = [
+                "Unmanaged/ Leisure - Pre → Retail",
+                "Unmanaged/ Leisure - Dis → Retail", 
+                "Package → Retail",
+                "Third Party Intermediary → Retail"
+            ]
+            for segment in retail_segments:
+                st.write(f"• {segment}")
+                
+            st.markdown("**🏢 Corporate Segments:**")
+            corporate_segments = [
+                "Managed Corporate - Global → Corporate",
+                "Managed Corporate - Local → Corporate", 
+                "Government → Corporate"
+            ]
+            for segment in corporate_segments:
+                st.write(f"• {segment}")
+                
         with col2:
-            st.markdown("#### 🏭 **WHOLESALE Segments**")
-            st.markdown("""
-            - **WHOL** - Wholesale Fixed Value  
-            """)
-            
-            st.markdown("#### 👥 **GROUP Segments**")
-            st.markdown("""
-            - **CORG** - Corporate Groups  
-            - **CONV** - Convention Groups  
-            - **ASSO** - Association Groups  
-            - **ADHO** - Adhoc Groups  
-            - **TOUR** - Tour Series Groups  
-            - **CONT** - Contract  
-            """)
-            
-            st.markdown("#### 🎁 **OTHER Segments**")
-            st.markdown("""
-            - **CPHS** - Complimentary & House Use  
-            """)
-        
+            st.markdown("**👥 Group Segments:**")
+            group_segments = [
+                "Corporate group → Groups",
+                "Convention → Groups",
+                "Association → Groups",
+                "AD Hoc Group → Groups",
+                "Tour Group → Groups"
+            ]
+            for segment in group_segments:
+                st.write(f"• {segment}")
+                
+            st.markdown("**🏭 Other Segments:**")
+            other_segments = [
+                "Wholesale Fixed Value → Leisure",
+                "Contract → Contract",
+                "Complimentary → Complimentary"
+            ]
+            for segment in other_segments:
+                st.write(f"• {segment}")
+                
         st.markdown("---")
-        
-        # PDF file path
-        pdf_path = "MHR Market Segmentation_071218.pdf"
-        
-        # Check if PDF exists
-        if os.path.exists(pdf_path):
-            try:
-                # Read and display the PDF
-                with open(pdf_path, "rb") as pdf_file:
-                    pdf_bytes = pdf_file.read()
-                
-                # Display PDF download link
-                st.download_button(
-                    label="📥 Download MHR Market Segmentation PDF",
-                    data=pdf_bytes,
-                    file_name="MHR_Market_Segmentation_071218.pdf",
-                    mime="application/pdf"
-                )
-                
-                st.markdown("---")
-                
-                # Display PDF content using Read tool
-                st.markdown("### 📄 Document Content")
-                st.markdown("*The PDF document content is displayed below:*")
-                
-                # Display the actual PDF content using Read tool
-                pdf_content_placeholder = st.empty()
-                
-                try:
-                    # Use base64 encoding to display PDF in iframe
-                    import base64
-                    base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-                    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf"></iframe>'
-                    st.markdown(pdf_display, unsafe_allow_html=True)
-                except Exception as display_error:
-                    st.warning(f"PDF inline display not supported. Error: {display_error}")
-                    # Fallback: Show file info and encourage download
-                    st.info("📋 PDF document is available for download above. Some browsers may not support inline PDF viewing.")
-                    
-                    # Show file information
-                    file_size = len(pdf_bytes) / 1024  # Size in KB
-                    st.metric("File Size", f"{file_size:.1f} KB")
-                    
-                    # Try to extract some basic info about the PDF
-                    st.markdown("**Document Information:**")
-                    st.markdown("- **Title:** MHR Market Segmentation Guidelines")
-                    st.markdown("- **Date:** December 7, 2018")
-                    st.markdown("- **Purpose:** Official market segmentation documentation for revenue analysis")
-                
-            except Exception as e:
-                st.error(f"Error loading PDF: {str(e)}")
-                st.info("Please ensure the PDF file 'MHR Market Segmentation_071218.pdf' is in the project root directory.")
-        else:
-            st.error("📄 PDF file not found!")
-            st.info("The file 'MHR Market Segmentation_071218.pdf' should be placed in the project root directory.")
-            st.markdown("**Expected file path:** `MHR Market Segmentation_071218.pdf`")
-            
-            # Show expected location
-            st.code("./MHR Market Segmentation_071218.pdf")
+        st.markdown("### 📋 Complete Segment Mapping")
+        st.info("These mappings are used to group individual segments into broader categories for analysis.")
 
 def adr_analysis_tab():
     """ADR Analysis Tab with comprehensive statistical analysis"""
@@ -3174,6 +3227,66 @@ def block_analysis_tab():
             
             st.dataframe(business_mix, use_container_width=True)
             
+            # === STACKED BAR CHART: MONTHLY ANALYSIS BY BOOKING STATUS ===
+            st.subheader("📊 Monthly Block Analysis - Stacked Bar Chart")
+            
+            # Ensure AllotmentDate is datetime
+            block_data['AllotmentDate'] = pd.to_datetime(block_data['AllotmentDate'])
+            
+            # Create monthly data grouped by booking status
+            monthly_status_data = block_data.groupby([
+                block_data['AllotmentDate'].dt.month, 
+                'BookingStatus'
+            ])['BlockSize'].sum().reset_index()
+            
+            # Convert month numbers to names
+            month_names = {1: 'Jan', 2: 'Feb', 3: 'Mar', 4: 'Apr', 5: 'May', 6: 'Jun',
+                         7: 'Jul', 8: 'Aug', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dec'}
+            monthly_status_data['MonthName'] = monthly_status_data['AllotmentDate'].map(month_names)
+            
+            # Create stacked bar chart
+            fig_stacked = px.bar(
+                monthly_status_data, 
+                x='MonthName', 
+                y='BlockSize', 
+                color='BookingStatus',
+                title="Monthly Block Size by Booking Status (Stacked)",
+                labels={'BlockSize': 'Total Block Size', 'MonthName': 'Month'},
+                color_discrete_map={
+                    'ACT': '#2ecc71',  # Green for Actual
+                    'DEF': '#f39c12',  # Orange for Definite  
+                    'TEN': '#e74c3c',  # Red for Tentative
+                    'PSP': '#9b59b6'   # Purple for Prospect
+                }
+            )
+            
+            # Update layout for better readability
+            fig_stacked.update_layout(
+                height=500,
+                xaxis_title="Month",
+                yaxis_title="Block Size",
+                legend_title="Booking Status",
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig_stacked, use_container_width=True)
+            
+            # Monthly summary table
+            st.write("**Monthly Summary Table:**")
+            monthly_pivot = monthly_status_data.pivot(index='MonthName', columns='BookingStatus', values='BlockSize').fillna(0)
+            
+            # Ensure proper month ordering
+            month_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            monthly_pivot = monthly_pivot.reindex([month for month in month_order if month in monthly_pivot.index])
+            
+            # Add totals
+            monthly_pivot['Total'] = monthly_pivot.sum(axis=1)
+            monthly_pivot.loc['Total'] = monthly_pivot.sum()
+            
+            # Format for display
+            monthly_pivot_display = monthly_pivot.round(0).astype(int)
+            st.dataframe(monthly_pivot_display, use_container_width=True)
+            
             # Forecast Pipeline
             st.subheader("🔮 Pipeline Analysis")
             
@@ -3200,150 +3313,629 @@ def block_analysis_tab():
                 st.plotly_chart(fig, use_container_width=True)
     
     with block_subtabs[2]:  # Blocks Last Year
-        st.subheader("📅 Blocks Last Year")
+        st.subheader("📅 2024 Block Analysis - Historical Data")
         
-        # Upload section for last year's block data
-        st.subheader("📤 Upload Last Year's Block Data")
+        # Load 2024 historical block data automatically from database
+        block_data_2024 = None
+        if database_available:
+            try:
+                db = get_database()
+                block_data_2024 = db.get_last_year_block_data()
+                if block_data_2024 is not None and not block_data_2024.empty:
+                    # Ensure date column is datetime
+                    block_data_2024['AllotmentDate'] = pd.to_datetime(block_data_2024['AllotmentDate'])
+            except Exception as e:
+                st.error(f"Failed to load 2024 block data: {str(e)}")
         
-        uploaded_last_year_file = st.file_uploader(
-            "Choose last year's block data TXT file",
-            type=['txt'],
-            help="Upload the TXT file containing last year's block data",
-            key="last_year_block_upload"
-        )
+        if block_data_2024 is None or block_data_2024.empty:
+            st.warning("⚠️ No 2024 historical block data available in the database.")
+            st.info("💡 The 2024 block data should be automatically loaded from the block_analysis_last_year table.")
+            return
         
-        if uploaded_last_year_file is not None:
-            # Save uploaded file
-            upload_path = Path("uploaded_last_year_blocks.txt")
-            with open(upload_path, "wb") as f:
-                f.write(uploaded_last_year_file.getbuffer())
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("🔄 Convert & Load Last Year Data", key="convert_last_year_blocks"):
-                    try:
-                        # Import the last year block converter
-                        from converters.last_year_block_converter import run_last_year_block_conversion
-                        
-                        with st.spinner("Converting and loading last year's block data..."):
-                            # Run conversion and database loading
-                            df, output_path, db_success = run_last_year_block_conversion(
-                                str(upload_path), 
-                                load_to_db=True
-                            )
-                            
-                            if db_success:
-                                st.success(f"✅ Successfully converted and loaded {len(df)} last year block records!")
-                                st.info(f"📄 Data saved to: {output_path}")
-                                
-                                # Show summary
-                                col_a, col_b, col_c = st.columns(3)
-                                with col_a:
-                                    st.metric("Records Loaded", len(df))
-                                with col_b:
-                                    st.metric("Total Blocks", f"{df['BlockSize'].sum():,}")
-                                with col_c:
-                                    st.metric("Companies", df['CompanyName'].nunique())
-                                
-                                # Force refresh of the page
-                                st.rerun()
-                            else:
-                                st.error("❌ Failed to load data to database")
-                                
-                    except Exception as e:
-                        st.error(f"❌ Error processing last year data: {str(e)}")
-            
-            with col2:
-                st.info("💡 This will convert the TXT file and load it into the database for analysis")
+        # Show data confirmation
+        data_years = sorted(block_data_2024['AllotmentDate'].dt.year.unique())
+        date_range = f"{block_data_2024['AllotmentDate'].min().date()} to {block_data_2024['AllotmentDate'].max().date()}"
+        st.success(f"📊 Successfully loaded {len(block_data_2024):,} records from {data_years} ({date_range})")
+        
+        # === SECTION 1: KEY PERFORMANCE INDICATORS ===
+        st.subheader("🎯 2024 Key Performance Indicators")
+        
+        kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+        
+        total_blocks = block_data_2024['BlockSize'].sum()
+        unique_companies = block_data_2024['CompanyName'].nunique()
+        unique_sales_reps = block_data_2024['SrepCode'].nunique()
+        avg_block_size = block_data_2024['BlockSize'].mean()
+        
+        with kpi_col1:
+            st.metric("Total Block Size", f"{total_blocks:,}", help="Total room blocks for 2024")
+        with kpi_col2:
+            st.metric("Unique Companies", f"{unique_companies:,}", help="Number of different companies")
+        with kpi_col3:
+            st.metric("Sales Reps", f"{unique_sales_reps:,}", help="Number of sales representatives")
+        with kpi_col4:
+            st.metric("Avg Block Size", f"{avg_block_size:.1f}", help="Average block size per record")
         
         st.markdown("---")
         
-        # Toggle between current and last year data
+        # === SECTION 2: MONTHLY TRENDS AND ANALYSIS ===
+        st.subheader("📈 2024 Monthly Block Trends")
+        
+        # Create monthly aggregation
+        monthly_data = block_data_2024.groupby(block_data_2024['AllotmentDate'].dt.month).agg({
+            'BlockSize': 'sum',
+            'CompanyName': 'nunique',
+            'AllotmentCode': 'count'
+        }).reset_index()
+        monthly_data['Month'] = monthly_data['AllotmentDate'].apply(
+            lambda x: pd.Timestamp(year=2024, month=x, day=1).strftime('%B')
+        )
+        
+        # Monthly blocks trend line
         col1, col2 = st.columns(2)
+        
         with col1:
-            data_source = st.selectbox(
-                "Data Source:",
-                ["Current Year Data", "Last Year Data"],
-                help="Choose which dataset to analyze"
-            )
+            fig_trend = px.line(monthly_data, x='Month', y='BlockSize', 
+                               title="Monthly Block Size Trend - 2024",
+                               markers=True, line_shape='spline')
+            fig_trend.update_traces(line=dict(width=3, color='#1f77b4'))
+            fig_trend.update_layout(showlegend=False)
+            st.plotly_chart(fig_trend, use_container_width=True)
         
-        # Get block data based on selection
-        if database_available:
-            db = get_database()
-            if data_source == "Last Year Data":
-                block_data = db.get_last_year_block_data()
-                data_year_label = "Last Year's"
-            else:
-                block_data = db.get_block_data()
-                data_year_label = "Current"
-        else:
-            block_data = pd.DataFrame()
+        with col2:
+            fig_companies = px.bar(monthly_data, x='Month', y='CompanyName',
+                                  title="Unique Companies per Month - 2024",
+                                  color='CompanyName', color_continuous_scale='viridis')
+            fig_companies.update_layout(showlegend=False)
+            st.plotly_chart(fig_companies, use_container_width=True)
         
-        if block_data.empty:
-            if data_source == "Last Year Data":
-                st.warning("⚠️ No last year block data available. Please upload and load last year's block data above.")
-            else:
-                st.warning("⚠️ No current block data available. Please load data in the Block EDA tab first.")
-        else:
-            # Get year information from the data
-            if 'AllotmentDate' in block_data.columns:
-                data_years = sorted(block_data['AllotmentDate'].dt.year.unique())
-                if data_source == "Last Year Data":
-                    st.success(f"📊 Found {len(block_data)} last year block records for {data_years}")
-                else:
-                    current_year = datetime.now().year
-                    last_year = current_year - 1
-                    last_year_data = block_data[block_data['AllotmentDate'].dt.year == last_year]
+        # Monthly breakdown table
+        st.subheader("📊 Monthly Breakdown")
+        monthly_display = monthly_data[['Month', 'BlockSize', 'CompanyName', 'AllotmentCode']].copy()
+        monthly_display.columns = ['Month', 'Total Blocks', 'Unique Companies', 'Total Records']
+        st.dataframe(monthly_display, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        
+        # === SECTION 3: TOP 10 COMPANIES ANALYSIS ===
+        st.subheader("🏆 Top 10 Companies - 2024 Block Analysis")
+        
+        # Calculate top companies
+        top_companies = block_data_2024.groupby('CompanyName').agg({
+            'BlockSize': 'sum',
+            'AllotmentCode': 'count',
+            'AllotmentDate': ['min', 'max']
+        }).reset_index()
+        
+        # Flatten column names
+        top_companies.columns = ['CompanyName', 'TotalBlocks', 'TotalBookings', 'FirstDate', 'LastDate']
+        top_companies = top_companies.nlargest(10, 'TotalBlocks')
+        
+        # Top 10 horizontal bar chart
+        fig_top10 = px.bar(top_companies, 
+                           x='TotalBlocks', 
+                           y='CompanyName',
+                           orientation='h',
+                           title="Top 10 Companies by Total Block Size - 2024",
+                           color='TotalBlocks',
+                           color_continuous_scale='Reds')
+        fig_top10.update_layout(yaxis={'categoryorder': 'total ascending'})
+        st.plotly_chart(fig_top10, use_container_width=True)
+        
+        # Top companies detailed table
+        st.subheader("📋 Top 10 Companies - Detailed Analysis")
+        top_companies_display = top_companies.copy()
+        top_companies_display['FirstDate'] = top_companies_display['FirstDate'].dt.date
+        top_companies_display['LastDate'] = top_companies_display['LastDate'].dt.date
+        top_companies_display['AvgBlockSize'] = (top_companies_display['TotalBlocks'] / top_companies_display['TotalBookings']).round(1)
+        
+        display_columns = ['CompanyName', 'TotalBlocks', 'TotalBookings', 'AvgBlockSize', 'FirstDate', 'LastDate']
+        column_labels = ['Company Name', 'Total Blocks', 'Bookings', 'Avg Block Size', 'First Booking', 'Last Booking']
+        
+        top_companies_display = top_companies_display[display_columns]
+        top_companies_display.columns = column_labels
+        st.dataframe(top_companies_display, use_container_width=True, hide_index=True)
+        
+        # === 2024 HEATMAP: COMPANY-DATE BLOCK ANALYSIS ===
+        st.subheader("🔥 2024 Company-Date Heatmap (Red Scale)")
+        
+        def create_2024_calendar_heatmap(block_data_2024):
+            """Create a calendar-style heatmap for 2024 data using RED colorscale"""
+            try:
+                if block_data_2024.empty:
+                    st.info("No data available for 2024 heatmap")
+                    return
+                
+                # Create pivot table: Companies (rows) vs Dates (columns) with BlockSize as values
+                pivot_data = block_data_2024.pivot_table(
+                    index='CompanyName', 
+                    columns='AllotmentDate', 
+                    values='BlockSize', 
+                    aggfunc='sum', 
+                    fill_value=0
+                )
+                
+                # Filter out companies with only zero block sizes - keep only companies with total blocks > 0
+                company_totals = pivot_data.sum(axis=1)
+                pivot_data = pivot_data.loc[company_totals > 0]
+                
+                # Limit to top 30 companies by total blocks for better visibility
+                company_totals = pivot_data.sum(axis=1).nlargest(30)
+                pivot_data = pivot_data.loc[company_totals.index]
+                
+                # Sort companies by total blocks (descending)
+                sorted_companies = company_totals.sort_values(ascending=False).index
+                pivot_data = pivot_data.reindex(sorted_companies)
+                
+                # Create custom hover text
+                hover_text = []
+                for i, company in enumerate(pivot_data.index):
+                    row_text = []
+                    for j, date in enumerate(pivot_data.columns):
+                        blocks = pivot_data.iloc[i, j]
+                        if blocks > 0:
+                            text = f"<b>{company}</b><br>Date: {date.strftime('%Y-%m-%d')}<br>Blocks: {blocks}<br>Year: 2024"
+                        else:
+                            text = f"<b>{company}</b><br>Date: {date.strftime('%Y-%m-%d')}<br>No bookings<br>Year: 2024"
+                        row_text.append(text)
+                    hover_text.append(row_text)
+                
+                # Create RED heatmap
+                fig = go.Figure(data=go.Heatmap(
+                    z=pivot_data.values,
+                    x=[date.strftime('%Y-%m-%d') for date in pivot_data.columns],
+                    y=pivot_data.index,
+                    colorscale='Reds',  # RED colorscale as requested
+                    hoverongaps=False,
+                    hovertemplate='%{customdata}<extra></extra>',
+                    customdata=hover_text,
+                    colorbar=dict(title="Block Size"),
+                    text=pivot_data.values,  # Show numbers on heatmap
+                    texttemplate="%{text}",
+                    textfont={"size": 8}
+                ))
+                
+                fig.update_layout(
+                    title='2024 Company Block Calendar Heatmap (Red Scale)',
+                    xaxis_title='Allotment Date (2024)',
+                    yaxis_title='Company Name (Top 30 by Total Blocks)',
+                    height=max(800, len(pivot_data) * 25),
+                    width=1400,
+                    xaxis=dict(tickangle=45, tickfont=dict(size=10)),
+                    yaxis=dict(automargin=True, tickfont=dict(size=9)),
+                    margin=dict(l=250, r=50, t=80, b=100)
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Heatmap summary
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Companies Shown", len(pivot_data))
+                with col2:
+                    st.metric("Date Range", f"{len(pivot_data.columns)} days")
+                with col3:
+                    st.metric("Peak Single Day", f"{pivot_data.values.max()} blocks")
+                
+            except Exception as e:
+                st.error(f"Error creating 2024 heatmap: {str(e)}")
+        
+        # Create the 2024 heatmap
+        create_2024_calendar_heatmap(block_data_2024)
+        
+        # === 2025 VS 2024 MONTHLY TREND COMPARISON (ACT+DEF vs ACTUALS) ===
+        st.subheader("📈 2025 Block EDA (ACT+DEF) vs 2024 Actuals - Monthly Trend Comparison")
+        
+        try:
+            # Get 2025 current block data (from Block EDA)
+            current_block_data = None
+            if database_available:
+                db = get_database()
+                current_block_data = db.get_block_data()
+            
+            if current_block_data is not None and not current_block_data.empty:
+                current_block_data['AllotmentDate'] = pd.to_datetime(current_block_data['AllotmentDate'])
+                
+                # Filter for 2025 data with ACT and DEF status only
+                current_2025_data = current_block_data[
+                    (current_block_data['AllotmentDate'].dt.year == 2025) & 
+                    (current_block_data['BookingStatus'].isin(['ACT', 'DEF']))
+                ]
+                
+                if not current_2025_data.empty:
+                    # Create daily data for 2024 (all data since it's already actual) - by actual date
+                    daily_2024 = block_data_2024.groupby('AllotmentDate').agg({
+                        'BlockSize': 'sum',
+                        'CompanyName': lambda x: list(x.unique())  # Get unique companies per date
+                    }).reset_index()
+                    daily_2024['Year'] = '2024 Actuals'
+                    daily_2024['CompanyCount'] = daily_2024['CompanyName'].apply(len)
+                    daily_2024['TopCompanies'] = daily_2024['CompanyName'].apply(
+                        lambda x: ', '.join(x[:5]) + ('...' if len(x) > 5 else '') if x else 'None'
+                    )
                     
-                    if last_year_data.empty:
-                        st.info(f"💡 No block data found for {last_year}. The dataset contains data from {data_years[0] if data_years else 'N/A'} to {data_years[-1] if data_years else 'N/A'}.")
-                        last_year_data = block_data  # Use all available data
-                    block_data = last_year_data
-            # Data overview
-            years_in_data = block_data['AllotmentDate'].dt.year.unique() if 'AllotmentDate' in block_data.columns else []
-            year_display = f"{data_year_label} Data ({min(years_in_data)} - {max(years_in_data)})" if len(years_in_data) > 0 else f"{data_year_label} Data"
+                    # Create daily data for 2025 (ACT + DEF only) - by actual date
+                    daily_2025 = current_2025_data.groupby('AllotmentDate').agg({
+                        'BlockSize': 'sum',
+                        'CompanyName': lambda x: list(x.unique())  # Get unique companies per date
+                    }).reset_index()
+                    daily_2025['Year'] = '2025 ACT+DEF'
+                    daily_2025['CompanyCount'] = daily_2025['CompanyName'].apply(len)
+                    daily_2025['TopCompanies'] = daily_2025['CompanyName'].apply(
+                        lambda x: ', '.join(x[:5]) + ('...' if len(x) > 5 else '') if x else 'None'
+                    )
+                    
+                    # Create daily trend comparison chart with day-of-year alignment
+                    # Transform dates to day-of-year for alignment
+                    daily_2024_copy = daily_2024.copy()
+                    daily_2025_copy = daily_2025.copy()
+                    
+                    # Add day-of-year columns for alignment
+                    daily_2024_copy['DayOfYear'] = daily_2024_copy['AllotmentDate'].dt.dayofyear
+                    daily_2025_copy['DayOfYear'] = daily_2025_copy['AllotmentDate'].dt.dayofyear
+                    
+                    # Create normalized date labels (using 2025 as reference year for display)
+                    daily_2024_copy['DisplayDate'] = daily_2024_copy['AllotmentDate'].apply(
+                        lambda x: pd.Timestamp(2025, x.month, x.day)
+                    )
+                    daily_2025_copy['DisplayDate'] = daily_2025_copy['AllotmentDate']
+                    
+                    # Merge on day-of-year to align same days
+                    daily_comparison = pd.merge(
+                        daily_2024_copy[['DayOfYear', 'DisplayDate', 'BlockSize', 'TopCompanies', 'CompanyCount', 'AllotmentDate']],
+                        daily_2025_copy[['DayOfYear', 'DisplayDate', 'BlockSize', 'TopCompanies', 'CompanyCount', 'AllotmentDate']],
+                        on='DayOfYear', how='outer', suffixes=('_2024', '_2025')
+                    ).fillna({'BlockSize_2024': 0, 'BlockSize_2025': 0, 'CompanyCount_2024': 0, 'CompanyCount_2025': 0})
+                    
+                    # Use 2025 DisplayDate for x-axis (or 2024 if 2025 is missing)
+                    daily_comparison['XAxisDate'] = daily_comparison['DisplayDate_2025'].fillna(daily_comparison['DisplayDate_2024'])
+                    daily_comparison = daily_comparison.sort_values('XAxisDate')
+                    
+                    fig_daily = go.Figure()
+                    
+                    # Add 2024 daily trend (red line, bottom layer) - using day-of-year alignment
+                    fig_daily.add_trace(go.Scatter(
+                        x=daily_comparison['XAxisDate'],
+                        y=daily_comparison['BlockSize_2024'],
+                        mode='lines+markers',
+                        name='2024 Actuals (Same Day Last Year)',
+                        line=dict(color='#e74c3c', width=3, dash='dash'),
+                        marker=dict(size=6, color='#e74c3c', symbol='circle'),
+                        hovertemplate=(
+                            '<b>2024 Actuals</b><br>' +
+                            'Day: %{x|%d %b}<br>' +
+                            'Actual Date: %{customdata[0]|%d %b %Y}<br>' +
+                            'Block Size: %{y:,}<br>' +
+                            'Companies: %{customdata[1]}<br>' +
+                            'Company Count: %{customdata[2]}<br>' +
+                            'Status: All (Actual)<br>' +
+                            '<extra></extra>'
+                        ),
+                        customdata=list(zip(
+                            daily_comparison['AllotmentDate_2024'].fillna(pd.NaT),
+                            daily_comparison['TopCompanies_2024'].fillna('None'),
+                            daily_comparison['CompanyCount_2024']
+                        ))
+                    ))
+                    
+                    # Add 2025 daily trend (blue line, top layer) - using day-of-year alignment
+                    fig_daily.add_trace(go.Scatter(
+                        x=daily_comparison['XAxisDate'],
+                        y=daily_comparison['BlockSize_2025'],
+                        mode='lines+markers',
+                        name='2025 ACT+DEF (Current Year)',
+                        line=dict(color='#3498db', width=4),
+                        marker=dict(size=8, color='#3498db', symbol='circle'),
+                        hovertemplate=(
+                            '<b>2025 ACT+DEF</b><br>' +
+                            'Day: %{x|%d %b}<br>' +
+                            'Actual Date: %{customdata[0]|%d %b %Y}<br>' +
+                            'Block Size: %{y:,}<br>' +
+                            'Companies: %{customdata[1]}<br>' +
+                            'Company Count: %{customdata[2]}<br>' +
+                            'Status: ACT+DEF Only<br>' +
+                            '<extra></extra>'
+                        ),
+                        customdata=list(zip(
+                            daily_comparison['AllotmentDate_2025'].fillna(pd.NaT),
+                            daily_comparison['TopCompanies_2025'].fillna('None'),
+                            daily_comparison['CompanyCount_2025']
+                        ))
+                    ))
+                    
+                    # Update layout for day-of-year comparison
+                    fig_daily.update_layout(
+                        title='📊 Daily Comparison: 2025 ACT+DEF vs Same Day Last Year (2024 Actuals)<br><sub>Each day of 2025 compared with same calendar day in 2024</sub>',
+                        xaxis_title='Calendar Day (Same Day Both Years)',
+                        yaxis_title='Block Size',
+                        height=650,
+                        hovermode='x unified',
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        ),
+                        xaxis=dict(
+                            tickformat='%d %b',  # Format as "20 Aug", "21 Aug", etc.
+                            dtick='D7',  # Show tick every 7 days (weekly)
+                            tickangle=45,  # Angle the dates for better readability
+                            showgrid=True,
+                            gridwidth=1,
+                            gridcolor='rgba(128,128,128,0.2)'
+                        ),
+                        yaxis=dict(
+                            showgrid=True,
+                            gridwidth=1,
+                            gridcolor='rgba(128,128,128,0.2)'
+                        ),
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        annotations=[
+                            dict(
+                                text="💡 Blue line (2025) shows on top of red dashed line (2024 same day)",
+                                showarrow=False,
+                                xref="paper", yref="paper",
+                                x=0.02, y=0.98, xanchor='left', yanchor='top',
+                                font=dict(size=10, color='gray')
+                            )
+                        ]
+                    )
+                    
+                    st.plotly_chart(fig_daily, use_container_width=True)
+                    
+                    # Daily comparison summary table - Same Day Year-over-Year
+                    st.subheader("📊 Same Day Year-over-Year Comparison Summary")
+                    st.write("*Comparing each day of 2025 with the exact same calendar day in 2024*")
+                    
+                    # Use the daily_comparison data we already created for the chart
+                    comparison_table = daily_comparison.copy()
+                    comparison_table['Difference'] = comparison_table['BlockSize_2025'] - comparison_table['BlockSize_2024']
+                    comparison_table['% Change'] = (
+                        (comparison_table['BlockSize_2025'] - comparison_table['BlockSize_2024']) / 
+                        comparison_table['BlockSize_2024'].replace(0, np.nan) * 100
+                    ).round(1)
+                    comparison_table['% Change'] = comparison_table['% Change'].fillna(0)
+                    
+                    # Format dates for display (show the calendar day)
+                    comparison_table['DateFormatted'] = comparison_table['XAxisDate'].dt.strftime('%d %b')
+                    comparison_table['ActualDate_2024'] = comparison_table['AllotmentDate_2024'].dt.strftime('%d %b %Y')
+                    comparison_table['ActualDate_2025'] = comparison_table['AllotmentDate_2025'].dt.strftime('%d %b %Y')
+                    
+                    # Format for display
+                    display_comparison = comparison_table[
+                        ['DateFormatted', 'ActualDate_2024', 'ActualDate_2025', 'BlockSize_2024', 'BlockSize_2025', 'Difference', '% Change', 'CompanyCount_2024', 'CompanyCount_2025']
+                    ].copy()
+                    display_comparison.columns = [
+                        'Calendar Day', '2024 Actual Date', '2025 Actual Date', '2024 Blocks', '2025 ACT+DEF', 'Difference', '% Change', '2024 Companies', '2025 Companies'
+                    ]
+                    
+                    # Filter out rows with no activity in either year for the top days display
+                    active_days = display_comparison[
+                        (display_comparison['2024 Blocks'] > 0) | (display_comparison['2025 ACT+DEF'] > 0)
+                    ].copy()
+                    
+                    # Show top 15 days with highest activity
+                    st.write("**🔥 Top 15 Calendar Days by Combined Activity (Same Day Both Years):**")
+                    active_days['TotalActivity'] = active_days['2024 Blocks'] + active_days['2025 ACT+DEF']
+                    top_days = active_days.nlargest(15, 'TotalActivity')[
+                        ['Calendar Day', '2024 Actual Date', '2025 Actual Date', '2024 Blocks', '2025 ACT+DEF', 'Difference', '% Change', '2024 Companies', '2025 Companies']
+                    ]
+                    st.dataframe(top_days, use_container_width=True, hide_index=True)
+                    
+                    # Show days where 2025 significantly outperforms 2024
+                    st.write("**📈 Days Where 2025 ACT+DEF Significantly Outperforms 2024:**")
+                    outperform_days = active_days[
+                        (active_days['Difference'] > 0) & (active_days['% Change'] >= 50)
+                    ].sort_values('% Change', ascending=False).head(10)
+                    if not outperform_days.empty:
+                        st.dataframe(outperform_days[
+                            ['Calendar Day', '2024 Blocks', '2025 ACT+DEF', 'Difference', '% Change']
+                        ], use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No days where 2025 significantly outperforms 2024 (>50% improvement)")
+                    
+                    # Show days where 2024 significantly outperformed 2025
+                    st.write("**📉 Days Where 2024 Significantly Outperformed 2025:**")
+                    underperform_days = active_days[
+                        (active_days['Difference'] < 0) & (active_days['% Change'] <= -50)
+                    ].sort_values('% Change').head(10)
+                    if not underperform_days.empty:
+                        st.dataframe(underperform_days[
+                            ['Calendar Day', '2024 Blocks', '2025 ACT+DEF', 'Difference', '% Change']
+                        ], use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No days where 2024 significantly outperformed 2025 (>50% decline)")
+                    
+                    # Summary metrics - Same Day Year-over-Year
+                    st.subheader("📊 Same Day Year-over-Year Performance Summary")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    # Calculate metrics from the aligned comparison data
+                    total_2024 = comparison_table['BlockSize_2024'].sum()
+                    total_2025 = comparison_table['BlockSize_2025'].sum()
+                    total_diff = total_2025 - total_2024
+                    pct_change_total = (total_diff / total_2024 * 100) if total_2024 > 0 else 0
+                    
+                    # Days with activity for both years
+                    common_days = comparison_table[
+                        (comparison_table['BlockSize_2024'] > 0) & (comparison_table['BlockSize_2025'] > 0)
+                    ]
+                    
+                    with col1:
+                        st.metric(
+                            "2024 Total Blocks", 
+                            f"{total_2024:,}",
+                            help="Total blocks across all matched calendar days in 2024"
+                        )
+                        
+                        # Peak day in 2024
+                        if total_2024 > 0:
+                            peak_2024_idx = comparison_table['BlockSize_2024'].idxmax()
+                            peak_2024_date = comparison_table.loc[peak_2024_idx, 'XAxisDate']
+                            peak_2024_blocks = comparison_table.loc[peak_2024_idx, 'BlockSize_2024']
+                            st.metric(
+                                "2024 Peak Day", 
+                                f"{peak_2024_date.strftime('%d %b')}: {peak_2024_blocks:,}",
+                                help="Highest single day in 2024"
+                            )
+                    
+                    with col2:
+                        st.metric(
+                            "2025 Total Blocks (ACT+DEF)", 
+                            f"{total_2025:,}",
+                            help="Total ACT+DEF blocks across all matched calendar days in 2025"
+                        )
+                        
+                        # Peak day in 2025
+                        if total_2025 > 0:
+                            peak_2025_idx = comparison_table['BlockSize_2025'].idxmax()
+                            peak_2025_date = comparison_table.loc[peak_2025_idx, 'XAxisDate']
+                            peak_2025_blocks = comparison_table.loc[peak_2025_idx, 'BlockSize_2025']
+                            st.metric(
+                                "2025 Peak Day", 
+                                f"{peak_2025_date.strftime('%d %b')}: {peak_2025_blocks:,}",
+                                help="Highest single day in 2025"
+                            )
+                    
+                    with col3:
+                        st.metric(
+                            "Year-over-Year Difference", 
+                            f"{total_diff:+,}",
+                            delta=f"{pct_change_total:+.1f}%",
+                            help="2025 vs 2024 same calendar days comparison"
+                        )
+                        
+                        # Days where 2025 beats 2024
+                        winning_days = len(comparison_table[comparison_table['BlockSize_2025'] > comparison_table['BlockSize_2024']])
+                        total_comparison_days = len(comparison_table[(comparison_table['BlockSize_2024'] > 0) | (comparison_table['BlockSize_2025'] > 0)])
+                        win_rate = (winning_days / total_comparison_days * 100) if total_comparison_days > 0 else 0
+                        
+                        st.metric(
+                            "2025 Winning Days", 
+                            f"{winning_days} of {total_comparison_days}",
+                            delta=f"{win_rate:.1f}% win rate",
+                            help="Days where 2025 ACT+DEF exceeds 2024 actuals"
+                        )
+                    
+                    with col4:
+                        # Average performance comparison
+                        avg_2024 = comparison_table[comparison_table['BlockSize_2024'] > 0]['BlockSize_2024'].mean()
+                        avg_2025 = comparison_table[comparison_table['BlockSize_2025'] > 0]['BlockSize_2025'].mean()
+                        avg_diff = avg_2025 - avg_2024 if not np.isnan(avg_2024) and not np.isnan(avg_2025) else 0
+                        
+                        st.metric(
+                            "Avg Blocks per Active Day", 
+                            f"2025: {avg_2025:.0f}" if not np.isnan(avg_2025) else "2025: 0",
+                            delta=f"vs 2024: {avg_2024:.0f}" if not np.isnan(avg_2024) else "vs 2024: 0",
+                            help="Average blocks per day (excluding zero-activity days)"
+                        )
+                        
+                        # Common active days performance
+                        if len(common_days) > 0:
+                            common_avg_2024 = common_days['BlockSize_2024'].mean()
+                            common_avg_2025 = common_days['BlockSize_2025'].mean()
+                            common_improvement = ((common_avg_2025 - common_avg_2024) / common_avg_2024 * 100) if common_avg_2024 > 0 else 0
+                            
+                            st.metric(
+                                "Common Days Performance", 
+                                f"{len(common_days)} shared active days",
+                                delta=f"{common_improvement:+.1f}% avg improvement",
+                                help="Performance on days with activity in both years"
+                            )
+                    
+                else:
+                    st.info("💡 No 2025 ACT+DEF block data available for comparison")
+                    
+            else:
+                st.info("💡 No current block data available from Block EDA for comparison")
+                
+        except Exception as e:
+            st.error(f"Error creating monthly trend comparison: {str(e)}")
+        
+        st.markdown("---")
+        
+        # === SECTION 4: SALES REPRESENTATIVE PERFORMANCE ===
+        st.subheader("👥 Sales Representative Performance - 2024")
+        
+        sales_rep_data = block_data_2024.groupby('SrepCode').agg({
+            'BlockSize': 'sum',
+            'CompanyName': 'nunique',
+            'AllotmentCode': 'count'
+        }).reset_index().sort_values('BlockSize', ascending=False)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            fig_sales_blocks = px.pie(sales_rep_data.head(8), 
+                                     values='BlockSize', 
+                                     names='SrepCode',
+                                     title="Block Size Distribution by Sales Rep")
+            st.plotly_chart(fig_sales_blocks, use_container_width=True)
+        
+        with col2:
+            fig_sales_companies = px.bar(sales_rep_data, 
+                                        x='SrepCode', 
+                                        y='CompanyName',
+                                        title="Companies Managed per Sales Rep",
+                                        color='CompanyName', 
+                                        color_continuous_scale='plasma')
+            st.plotly_chart(fig_sales_companies, use_container_width=True)
+        
+        # Sales rep performance table
+        sales_rep_display = sales_rep_data.copy()
+        sales_rep_display.columns = ['Sales Rep Code', 'Total Blocks', 'Unique Companies', 'Total Bookings']
+        sales_rep_display['Avg Blocks per Company'] = (sales_rep_display['Total Blocks'] / sales_rep_display['Unique Companies']).round(1)
+        st.dataframe(sales_rep_display, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        
+        # === SECTION 5: TIMELINE ANALYSIS ===
+        st.subheader("⏰ 2024 Booking Timeline Analysis")
+        
+        # Daily blocks over time
+        daily_data = block_data_2024.groupby('AllotmentDate')['BlockSize'].sum().reset_index()
+        
+        fig_timeline = px.line(daily_data, 
+                              x='AllotmentDate', 
+                              y='BlockSize',
+                              title="Daily Block Size Timeline - 2024",
+                              line_shape='spline')
+        fig_timeline.update_traces(line=dict(width=2, color='#e74c3c'))
+        fig_timeline.update_layout(
+            xaxis_title="Date",
+            yaxis_title="Block Size",
+            showlegend=False
+        )
+        st.plotly_chart(fig_timeline, use_container_width=True)
+        
+        # Peak booking periods
+        st.subheader("📊 Peak Booking Analysis")
+        peak_data = daily_data.nlargest(10, 'BlockSize')
+        peak_data['AllotmentDate'] = peak_data['AllotmentDate'].dt.date
+        peak_data.columns = ['Date', 'Block Size']
+        
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.write("**Top 10 Peak Booking Days:**")
+            st.dataframe(peak_data, use_container_width=True, hide_index=True)
+        
+        with col2:
+            # Weekly pattern analysis
+            block_data_2024_copy = block_data_2024.copy()
+            block_data_2024_copy['DayOfWeek'] = block_data_2024_copy['AllotmentDate'].dt.day_name()
+            weekly_pattern = block_data_2024_copy.groupby('DayOfWeek')['BlockSize'].sum().reset_index()
             
-            st.subheader(f"🔍 {year_display} Overview")
+            # Reorder days
+            day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            weekly_pattern['DayOfWeek'] = pd.Categorical(weekly_pattern['DayOfWeek'], categories=day_order, ordered=True)
+            weekly_pattern = weekly_pattern.sort_values('DayOfWeek')
             
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                total_blocks = block_data['BlockSize'].sum()
-                st.metric("Total Blocks", f"{total_blocks:,}")
-            
-            with col2:
-                unique_companies = block_data['CompanyName'].nunique()
-                st.metric("Unique Companies", unique_companies)
-            
-            with col3:
-                confirmed_blocks = block_data[block_data['BookingStatus'].isin(['ACT', 'DEF'])]['BlockSize'].sum()
-                st.metric("Confirmed Blocks", f"{confirmed_blocks:,}")
-            
-            with col4:
-                conversion_rate = (confirmed_blocks / total_blocks * 100) if total_blocks > 0 else 0
-                st.metric("Conversion Rate", f"{conversion_rate:.1f}%")
-            
-            # Monthly comparison
-            st.subheader(f"📈 {data_year_label} Monthly Analysis")
-            
-            monthly_data = block_data.groupby([block_data['AllotmentDate'].dt.month, 'BookingStatus'])['BlockSize'].sum().reset_index()
-            monthly_data['Month'] = monthly_data['AllotmentDate'].apply(lambda x: pd.Timestamp(year=2000, month=x, day=1).strftime('%B'))
-            
-            fig = px.bar(monthly_data, x='Month', y='BlockSize', color='BookingStatus',
-                        title=f"Monthly Blocks by Status - {data_year_label}")
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Top companies
-            st.subheader(f"🏢 Top Companies - {data_year_label}")
-            top_companies = block_data.groupby('CompanyName')['BlockSize'].sum().nlargest(10).reset_index()
-            fig = px.bar(top_companies, x='BlockSize', y='CompanyName', 
-                        orientation='h', title=f"Top 10 Companies by Blocks - {data_year_label}")
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Data table
-            st.subheader(f"📋 {data_year_label} Data Table")
-            st.dataframe(block_data.head(100), use_container_width=True)
+            fig_weekly = px.bar(weekly_pattern, x='DayOfWeek', y='BlockSize',
+                               title="Block Size by Day of Week - 2024",
+                               color='BlockSize', color_continuous_scale='sunset')
+            st.plotly_chart(fig_weekly, use_container_width=True)
 
 def block_dashboard_tab():
     """Block Dashboard tab with KPIs and interactive charts"""
