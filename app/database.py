@@ -778,18 +778,20 @@ class RevenueDatabase:
             logger.error(f"Failed to get database stats: {e}")
             return {}
     
-    def ingest_block_data(self, df: pd.DataFrame) -> bool:
+    def ingest_block_data(self, df: pd.DataFrame, table_suffix: str = '') -> bool:
         """
         Ingest block analysis data into database
         
         Args:
             df: DataFrame with block data
+            table_suffix: Optional suffix for table name (e.g., '_last_year')
             
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            logger.info(f"Ingesting block data: {len(df)} rows")
+            table_name = f'block_analysis{table_suffix}'
+            logger.info(f"Ingesting block data to {table_name}: {len(df)} rows")
             
             # Clean data for database insertion
             df_clean = df.copy()
@@ -801,17 +803,20 @@ class RevenueDatabase:
                     df_clean[col] = pd.to_datetime(df_clean[col]).dt.strftime('%Y-%m-%d')
             
             # Use pandas to_sql for efficient bulk insert
-            df_clean.to_sql('block_analysis', self.connection, if_exists='replace', index=False)
+            df_clean.to_sql(table_name, self.connection, if_exists='replace', index=False)
             
             # Update metadata
-            self._update_metadata('block_last_updated', datetime.now().isoformat())
-            self._update_metadata('block_rows', str(len(df)))
+            metadata_key = f'block{table_suffix}_last_updated' if table_suffix else 'block_last_updated'
+            rows_key = f'block{table_suffix}_rows' if table_suffix else 'block_rows'
             
-            logger.info("Block data ingestion completed successfully")
+            self._update_metadata(metadata_key, datetime.now().isoformat())
+            self._update_metadata(rows_key, str(len(df)))
+            
+            logger.info(f"Block data ingestion to {table_name} completed successfully")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to ingest block data: {e}")
+            logger.error(f"Failed to ingest block data to {table_name}: {e}")
             return False
     
     def get_block_data(self, booking_status: Optional[str] = None, 
@@ -862,6 +867,56 @@ class RevenueDatabase:
             
         except Exception as e:
             logger.error(f"Failed to retrieve block data: {e}")
+            return pd.DataFrame()
+    
+    def get_last_year_block_data(self, booking_status: Optional[str] = None, 
+                                start_date: Optional[str] = None, 
+                                end_date: Optional[str] = None) -> pd.DataFrame:
+        """
+        Retrieve last year's block analysis data
+        
+        Args:
+            booking_status: Filter by booking status (ACT/DEF/PSP/TEN)
+            start_date: Start date filter (YYYY-MM-DD)
+            end_date: End date filter (YYYY-MM-DD)
+            
+        Returns:
+            DataFrame with last year's block data
+        """
+        try:
+            query = "SELECT * FROM block_analysis_last_year"
+            params = []
+            conditions = []
+            
+            if booking_status:
+                conditions.append("BookingStatus = ?")
+                params.append(booking_status)
+            
+            if start_date:
+                conditions.append("AllotmentDate >= ?")
+                params.append(start_date)
+            
+            if end_date:
+                conditions.append("AllotmentDate <= ?")
+                params.append(end_date)
+            
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            
+            query += " ORDER BY AllotmentDate, CompanyName"
+            
+            df = pd.read_sql_query(query, self.connection, params=params)
+            
+            # Convert date columns back to datetime
+            date_columns = ['AllotmentDate', 'BeginDate']
+            for col in date_columns:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col])
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve last year block data: {e}")
             return pd.DataFrame()
     
     def get_block_summary_stats(self) -> dict:

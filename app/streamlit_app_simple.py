@@ -16,6 +16,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timedelta
 import io
+import tempfile
 import pandas as pd
 
 # Custom imports
@@ -149,6 +150,8 @@ if 'occupancy_data' not in st.session_state:
     st.session_state.occupancy_data = None
 if 'pickup_report_date' not in st.session_state:
     st.session_state.pickup_report_date = None
+if 'current_mhr_file' not in st.session_state:
+    st.session_state.current_mhr_file = None
 
 def extract_pickup_report_date(filename):
     """
@@ -188,6 +191,8 @@ if 'last_run_timestamp' not in st.session_state:
     st.session_state.last_run_timestamp = None
 if 'current_tab' not in st.session_state:
     st.session_state.current_tab = "Dashboard"
+if 'current_mhr_file' not in st.session_state:
+    st.session_state.current_mhr_file = None
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -334,32 +339,7 @@ def run_conversion_process(file_path):
 
 def show_conversion_summary(segment_df, occupancy_df, segment_path, occupancy_path):
     """Show summary of successful conversion"""
-    st.success("🎉 Conversion completed successfully!")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.metric("Segment Data", f"{len(segment_df)} rows")
-        st.metric("Segments", f"{segment_df['MergedSegment'].nunique()}" if 'MergedSegment' in segment_df.columns else "N/A")
-        
-    with col2:
-        st.metric("Occupancy Data", f"{len(occupancy_df)} rows")
-        st.metric("Date Range", f"{occupancy_df['Date'].min()} to {occupancy_df['Date'].max()}" if 'Date' in occupancy_df.columns else "N/A")
-    
-    # Show file paths
-    st.info(f"📄 Segment CSV: {segment_path}")
-    st.info(f"📄 Occupancy CSV: {occupancy_path}")
-    
-    # Show data previews
-    st.subheader("📊 Data Preview")
-    
-    tab1, tab2 = st.tabs(["Segment Data (Top 5)", "Occupancy Data (Top 5)"])
-    
-    with tab1:
-        st.dataframe(segment_df.head())
-    
-    with tab2:
-        st.dataframe(occupancy_df.head())
+    st.success("✅ Conversion completed successfully!")
 
 def show_data_status():
     """Show current data loading status"""
@@ -395,88 +375,46 @@ def placeholder_tab(title):
     if not st.session_state.data_loaded:
         show_loading_requirements()
 
+
 def dashboard_tab():
-    """Dashboard tab - data processing and key metrics"""
+    """Dashboard tab for data processing"""
     st.header("📊 Dashboard")
     
     # File upload section
-    st.subheader("1. Upload Excel File")
     uploaded_file = st.file_uploader(
         "Choose MHR Excel file",
         type=['xlsm', 'xlsx'],
-        help="Upload an MHR Pick Up Report with DPR sheet"
+        help="Upload an MHR Pick Up Report with DPR sheet",
+        key="main_dashboard_upload"
     )
-    
-    # Alternative: Use existing files
-    st.subheader("2. Or Select Existing File")
-    
-    # Look for existing Excel files in project root
-    excel_files = []
-    for ext in ['*.xlsm', '*.xlsx']:
-        excel_files.extend(project_root.glob(ext))
-    
-    if excel_files:
-        file_options = [""] + [f.name for f in excel_files]
-        selected_file = st.selectbox(
-            "Select from existing files:",
-            file_options,
-            help="Choose from Excel files found in the project directory"
-        )
-    else:
-        selected_file = ""
-        st.info("No Excel files found in project directory")
     
     # Determine which file to process
     file_to_process = None
     if uploaded_file is not None:
-        # Save uploaded file temporarily
-        temp_path = project_root / f"temp_{uploaded_file.name}"
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        file_to_process = temp_path
-        
-        # Extract and store pickup report date
-        extracted_date = extract_pickup_report_date(uploaded_file.name)
-        if extracted_date:
-            st.session_state.pickup_report_date = extracted_date
-            st.success(f"✅ Uploaded: {uploaded_file.name} (Report Date: {extracted_date})")
-        else:
-            st.success(f"✅ Uploaded: {uploaded_file.name}")
-    elif selected_file:
-        file_to_process = project_root / selected_file
-        
-        # Extract and store pickup report date
-        extracted_date = extract_pickup_report_date(selected_file)
-        if extracted_date:
-            st.session_state.pickup_report_date = extracted_date
-            st.success(f"✅ Selected: {selected_file} (Report Date: {extracted_date})")
-        else:
-            st.success(f"✅ Selected: {selected_file}")
-    
-    # Auto-processing section
-    st.subheader("3. Data Processing")
-    
-    if file_to_process:
-        st.info(f"Processing: {file_to_process.name}")
-        
-        # Auto-trigger processing
-        success = run_conversion_process(file_to_process)
-        
-        # Clean up temp file if it was uploaded
-        if uploaded_file is not None and temp_path.exists():
+        # Clean up any previous uploaded files
+        for old_file in project_root.glob("uploaded_*"):
             try:
-                temp_path.unlink()
-            except PermissionError:
-                st.warning(f"Could not delete temporary file {temp_path.name} - it may be in use. It will be cleaned up later.")
-            
+                old_file.unlink()
+            except:
+                pass  # Ignore errors when cleaning up old files
+        
+        # Save uploaded file to a persistent location for later access
+        persistent_filename = f"uploaded_{uploaded_file.name}"
+        persistent_path = project_root / persistent_filename
+        
+        # Write the uploaded file to persistent location
+        with open(persistent_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        file_to_process = persistent_path
+        
+        # Auto-trigger processing with loading indicator
+        with st.spinner("Processing file..."):
+            success = run_conversion_process(file_to_process)
+        
         if success:
-            st.balloons()
-    else:
-        st.warning("Please upload or select an Excel file first")
-    
-    # Show current status
-    st.subheader("4. Current Status")
-    show_data_status()
+            st.success("✅ Conversion completed successfully!")
+        else:
+            st.error("❌ Processing failed")
     
     # Try to load existing data if not already loaded
     if not st.session_state.data_loaded:
@@ -1173,336 +1111,473 @@ def daily_occupancy_tab():
     
     st.info(f"Showing {len(table_df)} rows")
 
+def style_variance_table(df, variance_col='Variance_%'):
+    """
+    Apply conditional formatting to variance tables
+    """
+    def color_variance(val):
+        """Color variance percentages: green for positive, red for negative"""
+        if isinstance(val, str) and '%' in val:
+            try:
+                numeric_val = float(val.replace('%', ''))
+                if numeric_val > 0:
+                    return 'background-color: #d4edda; color: #155724'  # Green
+                elif numeric_val < 0:
+                    return 'background-color: #f8d7da; color: #721c24'  # Red
+                else:
+                    return 'background-color: #e2e3e5; color: #383d41'  # Gray
+            except:
+                return ''
+        return ''
+    
+    def color_variance_amount(val):
+        """Color variance amounts: green for positive, red for negative"""
+        if isinstance(val, str) and 'AED' in val:
+            try:
+                # Extract numeric value from "AED X,XXX" format
+                numeric_str = val.replace('AED', '').replace(',', '').strip()
+                numeric_val = float(numeric_str)
+                if numeric_val > 0:
+                    return 'background-color: #d4edda; color: #155724'  # Green
+                elif numeric_val < 0:
+                    return 'background-color: #f8d7da; color: #721c24'  # Red
+                else:
+                    return 'background-color: #e2e3e5; color: #383d41'  # Gray
+            except:
+                return ''
+        return ''
+    
+    # Apply styling
+    styled_df = df.style.applymap(color_variance, subset=[variance_col])
+    styled_df = styled_df.applymap(color_variance_amount, subset=['Variance'])
+    
+    return styled_df
+
+def create_delta_comparison(df, col1, col2, comparison_name, segment_col, granularity):
+    """
+    Create delta comparison analysis with table and charts
+    
+    Args:
+        df: DataFrame with segment data
+        col1: Primary column (trend line)
+        col2: Comparison column (bar chart)
+        comparison_name: Name for the comparison
+        segment_col: Segment column to use
+        granularity: Analysis granularity (Monthly, Segment-wise, Both)
+    """
+    try:
+        # Calculate variance with zero division protection
+        df_analysis = df.copy()
+        df_analysis['Variance'] = df_analysis[col1] - df_analysis[col2]
+        
+        # Protect against division by zero
+        df_analysis['Variance_%'] = 0.0
+        mask = df_analysis[col2] != 0
+        df_analysis.loc[mask, 'Variance_%'] = ((df_analysis.loc[mask, col1] - df_analysis.loc[mask, col2]) / df_analysis.loc[mask, col2] * 100)
+        
+        # Replace infinite values
+        df_analysis['Variance_%'] = df_analysis['Variance_%'].replace([float('inf'), float('-inf')], 0).fillna(0)
+        
+        if granularity in ["Monthly", "Both"]:
+            st.subheader(f"📅 Monthly Analysis - {comparison_name}")
+            
+            # Monthly aggregation
+            monthly_data = df_analysis.groupby(['Month']).agg({
+                col1: 'sum',
+                col2: 'sum',
+                'Variance': 'sum'
+            }).reset_index()
+            
+            # Protect against division by zero for monthly data
+            monthly_data['Variance_%'] = 0.0
+            mask = monthly_data[col2] != 0
+            monthly_data.loc[mask, 'Variance_%'] = ((monthly_data.loc[mask, col1] - monthly_data.loc[mask, col2]) / monthly_data.loc[mask, col2] * 100)
+            monthly_data['Variance_%'] = monthly_data['Variance_%'].replace([float('inf'), float('-inf')], 0).fillna(0)
+            
+            # Create monthly table with conditional formatting
+            monthly_display = monthly_data.copy()
+            monthly_display['Month'] = monthly_display['Month'].dt.strftime('%Y-%m')
+            monthly_display[col1] = monthly_display[col1].apply(lambda x: f"AED {x:,.0f}")
+            monthly_display[col2] = monthly_display[col2].apply(lambda x: f"AED {x:,.0f}")
+            monthly_display['Variance'] = monthly_display['Variance'].apply(lambda x: f"AED {x:,.0f}")
+            monthly_display['Variance_%'] = monthly_display['Variance_%'].apply(lambda x: f"{x:.1f}%")
+            
+            # Display table with conditional formatting
+            st.write("**Monthly Comparison Table:**")
+            styled_monthly = style_variance_table(monthly_display)
+            st.dataframe(styled_monthly, use_container_width=True)
+            
+            # Create monthly chart
+            fig_monthly = go.Figure()
+            
+            # Add bar chart for comparison column
+            fig_monthly.add_trace(go.Bar(
+                x=monthly_data['Month'],
+                y=monthly_data[col2],
+                name=col2.replace('_', ' '),
+                marker_color='lightblue',
+                yaxis='y'
+            ))
+            
+            # Add line chart for primary column
+            fig_monthly.add_trace(go.Scatter(
+                x=monthly_data['Month'],
+                y=monthly_data[col1],
+                mode='lines+markers',
+                name=col1.replace('_', ' '),
+                line=dict(color='red', width=3),
+                yaxis='y'
+            ))
+            
+            fig_monthly.update_layout(
+                title=f'Monthly Trend - {comparison_name}',
+                xaxis_title='Month',
+                yaxis_title='Revenue (AED)',
+                height=500,
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig_monthly, use_container_width=True)
+        
+        if granularity in ["Segment-wise", "Both"]:
+            st.subheader(f"🎯 Segment Analysis - {comparison_name}")
+            
+            # Segment aggregation
+            segment_data = df_analysis.groupby([segment_col]).agg({
+                col1: 'sum',
+                col2: 'sum', 
+                'Variance': 'sum'
+            }).reset_index()
+            
+            # Protect against division by zero for segment data
+            segment_data['Variance_%'] = 0.0
+            mask = segment_data[col2] != 0
+            segment_data.loc[mask, 'Variance_%'] = ((segment_data.loc[mask, col1] - segment_data.loc[mask, col2]) / segment_data.loc[mask, col2] * 100)
+            segment_data['Variance_%'] = segment_data['Variance_%'].replace([float('inf'), float('-inf')], 0).fillna(0)
+            
+            # Sort by variance percentage
+            segment_data = segment_data.sort_values('Variance_%', ascending=False)
+            
+            # Create segment table with conditional formatting
+            segment_display = segment_data.copy()
+            segment_display[col1] = segment_display[col1].apply(lambda x: f"AED {x:,.0f}")
+            segment_display[col2] = segment_display[col2].apply(lambda x: f"AED {x:,.0f}")
+            segment_display['Variance'] = segment_display['Variance'].apply(lambda x: f"AED {x:,.0f}")
+            segment_display['Variance_%'] = segment_display['Variance_%'].apply(lambda x: f"{x:.1f}%")
+            
+            # Display table with conditional formatting
+            st.write("**Segment Comparison Table:**")
+            styled_segment = style_variance_table(segment_display)
+            st.dataframe(styled_segment, use_container_width=True)
+            
+            # Create segment chart
+            fig_segment = go.Figure()
+            
+            # Add bar chart for comparison column
+            fig_segment.add_trace(go.Bar(
+                x=segment_data[segment_col],
+                y=segment_data[col2],
+                name=col2.replace('_', ' '),
+                marker_color='lightgreen',
+                yaxis='y'
+            ))
+            
+            # Add line chart for primary column
+            fig_segment.add_trace(go.Scatter(
+                x=segment_data[segment_col],
+                y=segment_data[col1],
+                mode='lines+markers',
+                name=col1.replace('_', ' '),
+                line=dict(color='orange', width=3),
+                yaxis='y'
+            ))
+            
+            fig_segment.update_layout(
+                title=f'Segment Analysis - {comparison_name}',
+                xaxis_title='Segment',
+                yaxis_title='Revenue (AED)',
+                height=500,
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig_segment, use_container_width=True)
+            
+        # Variance summary
+        st.subheader(f"📊 Variance Summary - {comparison_name}")
+        col1_sum = df_analysis[col1].sum()
+        col2_sum = df_analysis[col2].sum()
+        total_variance = col1_sum - col2_sum
+        variance_pct = (total_variance / col2_sum * 100) if col2_sum != 0 else 0
+        
+        summary_col1, summary_col2, summary_col3 = st.columns(3)
+        
+        with summary_col1:
+            st.metric(
+                label=col1.replace('_', ' '),
+                value=f"AED {col1_sum:,.0f}"
+            )
+        
+        with summary_col2:
+            st.metric(
+                label=col2.replace('_', ' '),
+                value=f"AED {col2_sum:,.0f}"
+            )
+        
+        with summary_col3:
+            delta_color = "normal" if variance_pct >= 0 else "inverse"
+            st.metric(
+                label="Total Variance",
+                value=f"AED {total_variance:,.0f}",
+                delta=f"{variance_pct:.1f}%"
+            )
+            
+    except Exception as e:
+        st.error(f"Error in delta comparison: {str(e)}")
+
 def segment_analysis_tab():
     """Segment Analysis Tab with sub-tabs"""
     st.header("🎯 Segment Analysis")
     
     # Create sub-tabs
-    analysis_tab, market_seg_tab = st.tabs(["📊 Revenue Analysis", "📋 Market Segmentation"])
+    analysis_tab, delta_tab, market_seg_tab = st.tabs(["📊 Revenue Analysis", "📈 Delta Analysis", "📋 Market Segmentation"])
     
     with analysis_tab:
         st.subheader("📊 Revenue Analysis")
-    
-    if not st.session_state.data_loaded:
-        show_loading_requirements()
-        return
-    
-    # Get data from session state or database
-    if st.session_state.segment_data is not None:
-        df = st.session_state.segment_data.copy()
-    else:
-        if database_available:
-            db = get_database()
-            df = db.get_segment_data()
+        
+        if not st.session_state.data_loaded:
+            show_loading_requirements()
+            return
+        
+        # Get data from session state or database
+        if st.session_state.segment_data is not None:
+            df = st.session_state.segment_data.copy()
         else:
-            df = pd.DataFrame()  # Empty dataframe if no database
-    
-    if df.empty:
-        st.error("No segment data available")
-        return
-    
-    # Ensure Month column is datetime
-    if 'Month' in df.columns:
-        df['Month'] = pd.to_datetime(df['Month'], errors='coerce')
-        df = df.dropna(subset=['Month'])  # Remove rows with invalid dates
-    
-    # Controls
-    st.subheader("📊 Analysis Controls")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # Aggregation selector
-        aggregation = st.selectbox(
-            "Aggregation Level:",
-            ["Monthly", "Weekly", "Daily"],
-            index=0
-        )
-    
-    with col2:
-        # Segment type selector
-        use_merged = st.checkbox(
-            "Use Merged Segments",
-            value=True,
-            help="Use grouped segments (Retail, Corporate, etc.) vs original segments"
-        )
-    
-    with col3:
-        # Date range
-        if 'Month' in df.columns and len(df) > 0:
-            min_date = df['Month'].min().date()
-            max_date = df['Month'].max().date()
-            date_range = st.date_input(
-                "Date Range:",
-                value=(min_date, max_date),
-                min_value=min_date,
-                max_value=max_date
-            )
-            if len(date_range) == 2:
-                start_date, end_date = date_range
+            if database_available:
+                db = get_database()
+                df = db.get_segment_data()
             else:
-                start_date, end_date = min_date, max_date
-        else:
-            start_date = end_date = datetime.now().date()
-    
-    # Filter data by date range
-    if 'Month' in df.columns:
-        mask = (df['Month'].dt.date >= start_date) & (df['Month'].dt.date <= end_date)
-        filtered_df = df[mask]
-    else:
-        filtered_df = df
-    
-    # Choose segment column
-    segment_col = 'MergedSegment' if use_merged and 'MergedSegment' in filtered_df.columns else 'Segment'
-    
-    if segment_col not in filtered_df.columns:
-        st.error(f"Segment column '{segment_col}' not found in data")
-        return
-    
-    # Key metrics
-    st.subheader("📈 Key Performance Indicators")
-    
-    if 'Business_on_the_Books_Revenue' in filtered_df.columns:
-        col1, col2, col3, col4 = st.columns(4)
+                df = pd.DataFrame()  # Empty dataframe if no database
+        
+        if df.empty:
+            st.error("No segment data available")
+            return
+        
+        # Ensure Month column is datetime
+        if 'Month' in df.columns:
+            df['Month'] = pd.to_datetime(df['Month'], errors='coerce')
+            df = df.dropna(subset=['Month'])  # Remove rows with invalid dates
+        
+        # Controls
+        st.subheader("📊 Analysis Controls")
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            total_revenue = filtered_df['Business_on_the_Books_Revenue'].sum()
-            st.metric("Total BOB Revenue (AED)", f"{total_revenue:,.0f}")
+            # Aggregation selector
+            aggregation = st.selectbox(
+                "Aggregation Level:",
+                ["Monthly", "Weekly", "Daily"],
+                index=0
+            )
         
         with col2:
-            avg_revenue = filtered_df['Business_on_the_Books_Revenue'].mean()
-            st.metric("Average BOB Revenue (AED)", f"{avg_revenue:,.0f}")
+            # Segment type selector
+            use_merged = st.checkbox(
+                "Use Merged Segments",
+                value=True,
+                help="Use grouped segments (Retail, Corporate, etc.) vs original segments"
+            )
         
         with col3:
-            segments_count = filtered_df[segment_col].nunique()
-            st.metric("Active Segments", segments_count)
-        
-        with col4:
-            if 'Business_on_the_Books_Rooms' in filtered_df.columns:
-                total_rooms = filtered_df['Business_on_the_Books_Rooms'].sum()
-                st.metric("Total BOB Rooms", f"{total_rooms:,.0f}")
-    
-    # Top 5 segments by revenue
-    st.subheader("🏆 Top 5 Segments by Revenue")
-    
-    if 'Business_on_the_Books_Revenue' in filtered_df.columns:
-        top_segments = filtered_df.groupby(segment_col)['Business_on_the_Books_Revenue'].sum().sort_values(ascending=False).head(5)
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            # Bar chart
-            fig_bar = px.bar(
-                x=top_segments.values,
-                y=top_segments.index,
-                orientation='h',
-                title="Top 5 Segments by Business on the Books Revenue",
-                labels={'x': 'Revenue (AED)', 'y': 'Segment'}
-            )
-            fig_bar.update_layout(height=400)
-            st.plotly_chart(fig_bar, use_container_width=True)
-        
-        with col2:
-            # Table
-            top_df = pd.DataFrame({
-                'Segment': top_segments.index,
-                'Revenue (AED)': [f"{x:,.0f}" for x in top_segments.values],
-                'Share': [f"{(x/top_segments.sum())*100:.1f}%" for x in top_segments.values]
-            })
-            st.dataframe(top_df, hide_index=True)
-    
-    # Time series analysis
-    st.subheader("📈 Revenue Time Series")
-    
-    if 'Month' in filtered_df.columns and 'Business_on_the_Books_Revenue' in filtered_df.columns:
-        # Prepare time series data based on aggregation
-        if aggregation == "Monthly":
-            ts_data = filtered_df.groupby(['Month', segment_col])['Business_on_the_Books_Revenue'].sum().reset_index()
-            date_col = 'Month'
-        elif aggregation == "Weekly":
-            # Convert to weekly (this is an approximation since we have monthly data)
-            ts_data = filtered_df.groupby(['Month', segment_col])['Business_on_the_Books_Revenue'].sum().reset_index()
-            date_col = 'Month'
-            st.info("Weekly aggregation shown as monthly (source data is monthly)")
-        else:  # Daily
-            # Convert to daily (this is an approximation since we have monthly data)
-            ts_data = filtered_df.groupby(['Month', segment_col])['Business_on_the_Books_Revenue'].sum().reset_index()
-            date_col = 'Month'
-            st.info("Daily aggregation shown as monthly (source data is monthly)")
-        
-        # Create time series chart
-        fig_ts = px.line(
-            ts_data,
-            x=date_col,
-            y='Business_on_the_Books_Revenue',
-            color=segment_col,
-            title=f"Business on the Books Revenue by Segment ({aggregation})",
-            labels={'Business_on_the_Books_Revenue': 'Revenue (AED)', date_col: 'Date'}
-        )
-        fig_ts.update_layout(height=500)
-        st.plotly_chart(fig_ts, use_container_width=True)
-        
-        # Segment selector for detailed view
-        if 'top_segments' in locals():
-            default_segments = top_segments.index[:3].tolist()
-        else:
-            default_segments = filtered_df[segment_col].unique()[:3].tolist()
-            
-        selected_segments = st.multiselect(
-            "Select segments for detailed view:",
-            options=filtered_df[segment_col].unique(),
-            default=default_segments
-        )
-        
-        if selected_segments:
-            segment_detail = ts_data[ts_data[segment_col].isin(selected_segments)]
-            
-            fig_detail = px.line(
-                segment_detail,
-                x=date_col,
-                y='Business_on_the_Books_Revenue',
-                color=segment_col,
-                title="Selected Segments - Detailed View",
-                labels={'Business_on_the_Books_Revenue': 'Revenue (AED)', date_col: 'Date'}
-            )
-            fig_detail.update_layout(height=400)
-            st.plotly_chart(fig_detail, use_container_width=True)
-    
-    # Month-over-Month growth analysis
-    st.subheader("📊 Month-over-Month Growth")
-    
-    if 'Month' in filtered_df.columns and 'Business_on_the_Books_Revenue' in filtered_df.columns:
-        try:
-            # Calculate MoM growth
-            monthly_data = filtered_df.groupby([segment_col, 'Month'])['Business_on_the_Books_Revenue'].sum().reset_index()
-            monthly_data = monthly_data.sort_values(['Month'])
-            
-            # Calculate growth for each segment
-            growth_data = []
-            for segment in monthly_data[segment_col].unique():
-                segment_data = monthly_data[monthly_data[segment_col] == segment].copy()
-                segment_data['Revenue_Prev'] = segment_data['Business_on_the_Books_Revenue'].shift(1)
-                segment_data['MoM_Growth'] = segment_data.apply(
-                    lambda row: ((row['Business_on_the_Books_Revenue'] - row['Revenue_Prev']) / row['Revenue_Prev'] * 100) 
-                    if row['Revenue_Prev'] != 0 and pd.notna(row['Revenue_Prev']) 
-                    else 0, axis=1
+            # Date range
+            if 'Month' in df.columns and len(df) > 0:
+                min_date = df['Month'].min().date()
+                max_date = df['Month'].max().date()
+                date_range = st.date_input(
+                    "Date Range:",
+                    value=(min_date, max_date),
+                    min_value=min_date,
+                    max_value=max_date
                 )
-                growth_data.append(segment_data)
+                if len(date_range) == 2:
+                    start_date, end_date = date_range
+                else:
+                    start_date, end_date = min_date, max_date
+            else:
+                start_date = end_date = datetime.now().date()
+    
+        # Filter data by date range
+        if 'Month' in df.columns:
+            mask = (df['Month'].dt.date >= start_date) & (df['Month'].dt.date <= end_date)
+            filtered_df = df[mask]
+        else:
+            filtered_df = df
+        
+        # Choose segment column
+        segment_col = 'MergedSegment' if use_merged and 'MergedSegment' in filtered_df.columns else 'Segment'
+        
+        if segment_col not in filtered_df.columns:
+            st.error(f"Segment column '{segment_col}' not found in data")
+            return
+        
+        # Key metrics
+        st.subheader("📈 Key Performance Indicators")
+        
+        if 'Business_on_the_Books_Revenue' in filtered_df.columns:
+            col1, col2, col3, col4 = st.columns(4)
             
-            if growth_data:
-                growth_df = pd.concat(growth_data, ignore_index=True)
-                growth_df = growth_df.dropna(subset=['MoM_Growth'])
-                
-                if not growth_df.empty:
-                    # Latest month growth
-                    latest_month = growth_df['Month'].max()
-                    latest_growth = growth_df[growth_df['Month'] == latest_month]
-                    
-                    if not latest_growth.empty:
-                        col1, col2 = st.columns([2, 1])
-                        
-                        with col1:
-                            fig_growth = px.bar(
-                                latest_growth,
-                                x=segment_col,
-                                y='MoM_Growth',
-                                title=f"Month-over-Month Growth - {latest_month.strftime('%B %Y')}",
-                                labels={'MoM_Growth': 'Growth %', segment_col: 'Segment'}
-                            )
-                            fig_growth.update_layout(height=400)
-                            st.plotly_chart(fig_growth, use_container_width=True)
-                        
-                        with col2:
-                            # Growth table
-                            growth_table = latest_growth[[segment_col, 'MoM_Growth']].copy()
-                            growth_table['MoM_Growth'] = growth_table['MoM_Growth'].apply(lambda x: f"{x:+.1f}%")
-                            growth_table = growth_table.rename(columns={segment_col: 'Segment', 'MoM_Growth': 'Growth %'})
-                            st.dataframe(growth_table, hide_index=True)
-        except Exception as e:
-            st.warning(f"Could not calculate MoM growth: {str(e)}")
+            with col1:
+                total_revenue = filtered_df['Business_on_the_Books_Revenue'].sum()
+                st.metric("Total BOB Revenue (AED)", f"{total_revenue:,.0f}")
+            
+            with col2:
+                avg_revenue = filtered_df['Business_on_the_Books_Revenue'].mean()
+                st.metric("Average BOB Revenue (AED)", f"{avg_revenue:,.0f}")
+            
+            with col3:
+                segments_count = filtered_df[segment_col].nunique()
+                st.metric("Active Segments", segments_count)
+            
+            with col4:
+                if 'Business_on_the_Books_Rooms' in filtered_df.columns:
+                    total_rooms = filtered_df['Business_on_the_Books_Rooms'].sum()
+                    st.metric("Total BOB Rooms", f"{total_rooms:,.0f}")
+        
+        # Top 5 segments by revenue
+        st.subheader("🏆 Top 5 Segments by Revenue")
+        
+        if 'Business_on_the_Books_Revenue' in filtered_df.columns:
+            top_segments = filtered_df.groupby(segment_col)['Business_on_the_Books_Revenue'].sum().sort_values(ascending=False).head(5)
+            
+            # Simple table display
+            top_segments_df = top_segments.reset_index()
+            top_segments_df.columns = ['Segment', 'Revenue']
+            top_segments_df['Revenue'] = top_segments_df['Revenue'].apply(lambda x: f"AED {x:,.0f}")
+            st.dataframe(top_segments_df, use_container_width=True, hide_index=True)
     
-    # Revenue forecast
-    st.subheader("🔮 Revenue Forecast")
-    
-    try:
-        # Try to import forecasting module
-        from app.forecasting import get_forecaster
-        forecaster = get_forecaster()
+    with delta_tab:
+        st.subheader("📈 Delta Analysis")
         
-        if st.button("Generate 3-Month Forecast"):
-            with st.spinner("Generating forecast..."):
-                try:
-                    forecast_df = forecaster.forecast_segment_revenue(filtered_df, months=3)
-                    
-                    if not forecast_df.empty:
-                        st.success("✅ Forecast generated successfully!")
-                        
-                        # Display forecast chart
-                        fig_forecast = px.line(
-                            forecast_df,
-                            x='date',
-                            y='forecast',
-                            color='segment',
-                            title="3-Month Revenue Forecast by Segment",
-                            labels={'forecast': 'Forecast Revenue (AED)', 'date': 'Date', 'segment': 'Segment'}
-                        )
-                        st.plotly_chart(fig_forecast, use_container_width=True)
-                        
-                        # Display forecast table
-                        display_forecast = forecast_df.copy()
-                        display_forecast['date'] = display_forecast['date'].dt.strftime('%Y-%m')
-                        display_forecast['forecast'] = display_forecast['forecast'].apply(lambda x: f"AED {x:,.0f}")
-                        if 'lower_ci' in display_forecast.columns:
-                            display_forecast['lower_ci'] = display_forecast['lower_ci'].apply(lambda x: f"AED {x:,.0f}")
-                        if 'upper_ci' in display_forecast.columns:
-                            display_forecast['upper_ci'] = display_forecast['upper_ci'].apply(lambda x: f"AED {x:,.0f}")
-                        
-                        display_forecast = display_forecast.rename(columns={
-                            'date': 'Month',
-                            'segment': 'Segment',
-                            'forecast': 'Forecast Revenue',
-                            'lower_ci': 'Lower 95% CI',
-                            'upper_ci': 'Upper 95% CI'
-                        })
-                        
-                        st.dataframe(display_forecast, use_container_width=True)
-                    else:
-                        st.error("❌ Could not generate forecast")
-                except Exception as forecast_error:
-                    st.error(f"❌ Forecast generation failed: {str(forecast_error)}")
-    except ImportError:
-        st.info("📊 Advanced forecasting module not available")
-    except Exception as e:
-        st.warning(f"⚠️ Forecasting unavailable: {str(e)}")
-    
-    # Enhanced data summary table
-    st.subheader("📋 Segment Data Summary")
-    
-    # Summary statistics
-    if 'Business_on_the_Books_Revenue' in filtered_df.columns:
-        # Build aggregation dictionary dynamically based on available columns
-        agg_dict = {
-            'Business_on_the_Books_Revenue': ['sum', 'mean', 'count']
-        }
+        # Check if data is loaded
+        if not st.session_state.data_loaded:
+            show_loading_requirements()
+            return
         
-        if 'Business_on_the_Books_Rooms' in filtered_df.columns:
-            agg_dict['Business_on_the_Books_Rooms'] = ['sum', 'mean']
+        # Get data from session state or database
+        if st.session_state.segment_data is not None:
+            delta_df = st.session_state.segment_data.copy()
+        else:
+            if database_available:
+                db = get_database()
+                delta_df = db.get_segment_data()
+            else:
+                delta_df = pd.DataFrame()
         
-        if 'Business_on_the_Books_ADR' in filtered_df.columns:
-            agg_dict['Business_on_the_Books_ADR'] = ['mean']
+        if delta_df.empty:
+            st.error("No segment data available for delta analysis")
+            return
         
-        summary_stats = filtered_df.groupby(segment_col).agg(agg_dict).round(2)
+        # Ensure Month column is datetime
+        if 'Month' in delta_df.columns:
+            delta_df['Month'] = pd.to_datetime(delta_df['Month'], errors='coerce')
+            delta_df = delta_df.dropna(subset=['Month'])
         
-        # Flatten column names
-        summary_stats.columns = ['_'.join(col).strip() for col in summary_stats.columns.values]
-        summary_stats = summary_stats.reset_index()
+        # Delta Analysis Controls
+        st.subheader("🎛️ Analysis Controls")
+        delta_col1, delta_col2, delta_col3 = st.columns(3)
         
-        # Format monetary columns
-        monetary_cols = [col for col in summary_stats.columns if 'Revenue' in col or 'ADR' in col]
-        for col in monetary_cols:
-            if col in summary_stats.columns:
-                summary_stats[col] = summary_stats[col].apply(lambda x: f"AED {x:,.0f}" if pd.notna(x) else "AED 0")
+        with delta_col1:
+            # Segment type toggle
+            use_merged_delta = st.checkbox(
+                "Use Merged Segments",
+                value=True,
+                help="Use grouped segments (Retail, Corporate, etc.) vs original segments",
+                key="delta_merged_toggle"
+            )
         
-        st.dataframe(summary_stats, use_container_width=True)
+        with delta_col2:
+            # Month filter
+            if 'Month' in delta_df.columns and len(delta_df) > 0:
+                available_months = sorted(delta_df['Month'].dt.to_period('M').unique())
+                selected_months = st.multiselect(
+                    "Select Months:",
+                    options=available_months,
+                    default=available_months[-3:] if len(available_months) >= 3 else available_months,
+                    format_func=lambda x: str(x),
+                    key="delta_month_filter"
+                )
+        
+        with delta_col3:
+            # Analysis type
+            analysis_granularity = st.selectbox(
+                "Granularity:",
+                ["Monthly", "Segment-wise", "Both"],
+                help="Choose analysis granularity",
+                key="delta_granularity"
+            )
+        
+        # Filter data based on selections
+        if selected_months:
+            delta_df = delta_df[delta_df['Month'].dt.to_period('M').isin(selected_months)]
+        
+        # Choose segment column
+        segment_col = 'MergedSegment' if use_merged_delta and 'MergedSegment' in delta_df.columns else 'Segment'
+        
+        if delta_df.empty:
+            st.warning("No data available for selected filters")
+            return
+        
+        # Required columns check
+        required_columns = [
+            'Business_on_the_Books_Revenue',
+            'Business_on_the_Books_Same_Time_Last_Year_Revenue', 
+            'Full_Month_Last_Year_Revenue',
+            'Budget_This_Year_Revenue'
+        ]
+        
+        missing_columns = [col for col in required_columns if col not in delta_df.columns]
+        if missing_columns:
+            st.error(f"Missing required columns for delta analysis: {missing_columns}")
+            return
+        
+        # Create delta analysis sections
+        st.markdown("---")
+        
+        # Section 1: BOB vs Same Time Last Year
+        st.subheader("📊 Section 1: Business on Books vs Same Time Last Year")
+        create_delta_comparison(
+            delta_df, 
+            'Business_on_the_Books_Revenue', 
+            'Business_on_the_Books_Same_Time_Last_Year_Revenue',
+            'BOB vs STLY',
+            segment_col,
+            analysis_granularity
+        )
+        
+        st.markdown("---")
+        
+        # Section 2: BOB vs Full Month Last Year  
+        st.subheader("📊 Section 2: Business on Books vs Full Month Last Year")
+        create_delta_comparison(
+            delta_df,
+            'Business_on_the_Books_Revenue',
+            'Full_Month_Last_Year_Revenue', 
+            'BOB vs FMLY',
+            segment_col,
+            analysis_granularity
+        )
+        
+        st.markdown("---")
+        
+        # Section 3: Budget vs BOB
+        st.subheader("📊 Section 3: Budget This Year vs Business on Books")
+        create_delta_comparison(
+            delta_df,
+            'Budget_This_Year_Revenue',
+            'Business_on_the_Books_Revenue',
+            'Budget vs BOB', 
+            segment_col,
+            analysis_granularity
+        )
     
     with market_seg_tab:
         st.subheader("📋 MHR Market Segmentation Documentation")
@@ -2404,147 +2479,410 @@ def create_calendar_heatmap(block_data):
             app_logger.error(f"Calendar heatmap error: {e}")
 
 def block_analysis_tab():
-    """Block Analysis tab with EDA functionality"""
-    st.header("📊 Block Analysis & EDA")
+    """Block Analysis tab with subtabs for EDA, Dashboard, and Last Year"""
+    st.header("📊 Block Analysis")
     
-    # File upload section
-    st.subheader("📁 Load Block Data")
+    # Create subtabs
+    block_subtabs = st.tabs(["📈 Block EDA", "📊 Block Dashboard", "📅 Blocks Last Year"])
     
-    uploaded_file = st.file_uploader(
-        "Choose a Block Data file", 
-        type=['txt'],
-        help="Upload a block data TXT file for analysis"
-    )
-    
-    if uploaded_file is not None:
-        if st.button("Process Block Data", type="primary"):
-            process_block_data_file(uploaded_file)
-    
-    # Check if we have block data
-    if database_available:
-        db = get_database()
-        block_data = db.get_block_data()
-    else:
-        block_data = pd.DataFrame()
-    
-    if block_data.empty:
-        st.info("💡 Please upload a block data file to begin analysis")
-        st.markdown("""
-        **Expected file format:**
-        - Tab-separated TXT file
-        - Columns: BLOCKSIZE, ALLOTMENT_DATE, SREP_CODE, BOOKING_STATUS, DESCRIPTION
-        - Booking Status Codes: ACT (Actual), DEF (Definite), PSP (Prospect), TEN (Tentative)
-        """)
-        return
-    
-    st.success(f"📈 Loaded {len(block_data)} block records")
-    
-    # Data overview
-    st.subheader("🔍 Data Overview")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_blocks = block_data['BlockSize'].sum()
-        st.metric("Total Blocks", f"{total_blocks:,}")
-    
-    with col2:
-        unique_companies = block_data['CompanyName'].nunique()
-        st.metric("Unique Companies", unique_companies)
-    
-    with col3:
-        date_range = f"{block_data['AllotmentDate'].min().strftime('%Y-%m-%d')} to {block_data['AllotmentDate'].max().strftime('%Y-%m-%d')}"
-        st.metric("Date Range", "See below")
-        st.caption(date_range)
-    
-    with col4:
-        avg_block_size = block_data['BlockSize'].mean()
-        st.metric("Avg Block Size", f"{avg_block_size:.1f}")
-    
-    # Filters
-    st.subheader("🎛️ Filters")
-    
-    filter_col1, filter_col2, filter_col3 = st.columns(3)
-    
-    with filter_col1:
-        status_filter = st.multiselect(
-            "Booking Status",
-            options=block_data['BookingStatus'].unique(),
-            default=block_data['BookingStatus'].unique()
+    with block_subtabs[0]:  # Block EDA
+        st.subheader("📈 Block EDA")
+        
+        # File upload section
+        st.subheader("📁 Load Block Data")
+        
+        uploaded_file = st.file_uploader(
+            "Choose a Block Data file", 
+            type=['txt'],
+            help="Upload a block data TXT file for analysis",
+            key="block_eda_upload"
         )
+        
+        if uploaded_file is not None:
+            if st.button("Process Block Data", type="primary"):
+                process_block_data_file(uploaded_file)
+        
+        # Check if we have block data
+        if database_available:
+            db = get_database()
+            block_data = db.get_block_data()
+        else:
+            block_data = pd.DataFrame()
+        
+        if block_data.empty:
+            st.info("💡 Please upload a block data file to begin analysis")
+            st.markdown("""
+            **Expected file format:**
+            - Tab-separated TXT file
+            - Columns: BLOCKSIZE, ALLOTMENT_DATE, SREP_CODE, BOOKING_STATUS, DESCRIPTION
+            - Booking Status Codes: ACT (Actual), DEF (Definite), PSP (Prospect), TEN (Tentative)
+            """)
+        else:
+            st.success(f"📈 Loaded {len(block_data)} block records")
+            
+            # Data overview
+            st.subheader("🔍 Data Overview")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total_blocks = block_data['BlockSize'].sum()
+                st.metric("Total Blocks", f"{total_blocks:,}")
+            
+            with col2:
+                unique_companies = block_data['CompanyName'].nunique()
+                st.metric("Unique Companies", unique_companies)
+            
+            with col3:
+                date_range = f"{block_data['AllotmentDate'].min().strftime('%Y-%m-%d')} to {block_data['AllotmentDate'].max().strftime('%Y-%m-%d')}"
+                st.metric("Date Range", "See below")
+                st.caption(date_range)
+            
+            with col4:
+                avg_block_size = block_data['BlockSize'].mean()
+                st.metric("Avg Block Size", f"{avg_block_size:.1f}")
+            
+            # Filters
+            st.subheader("🎛️ Filters")
+            
+            filter_col1, filter_col2, filter_col3 = st.columns(3)
+            
+            with filter_col1:
+                status_filter = st.multiselect(
+                    "Booking Status",
+                    options=block_data['BookingStatus'].unique(),
+                    default=block_data['BookingStatus'].unique(),
+                    key="eda_status_filter"
+                )
+            
+            with filter_col2:
+                companies = ['All'] + sorted(block_data['CompanyName'].unique().tolist())
+                company_filter = st.selectbox("Company", companies, key="eda_company_filter")
+            
+            with filter_col3:
+                date_range_filter = st.date_input(
+                    "Date Range",
+                    value=(block_data['AllotmentDate'].min(), block_data['AllotmentDate'].max()),
+                    min_value=block_data['AllotmentDate'].min(),
+                    max_value=block_data['AllotmentDate'].max(),
+                    key="eda_date_filter"
+                )
+            
+            # Apply filters
+            filtered_data = block_data.copy()
+            
+            if status_filter:
+                filtered_data = filtered_data[filtered_data['BookingStatus'].isin(status_filter)]
+            
+            if company_filter != 'All':
+                filtered_data = filtered_data[filtered_data['CompanyName'] == company_filter]
+            
+            if len(date_range_filter) == 2:
+                start_date, end_date = date_range_filter
+                filtered_data = filtered_data[
+                    (filtered_data['AllotmentDate'] >= pd.Timestamp(start_date)) &
+                    (filtered_data['AllotmentDate'] <= pd.Timestamp(end_date))
+                ]
+            
+            st.subheader("📊 Exploratory Data Analysis")
+            
+            # EDA Charts
+            eda_col1, eda_col2 = st.columns(2)
+            
+            with eda_col1:
+                # Booking status distribution
+                st.write("**Booking Status Distribution**")
+                status_dist = filtered_data.groupby('BookingStatus')['BlockSize'].sum().reset_index()
+                fig = px.pie(status_dist, values='BlockSize', names='BookingStatus', 
+                             title="Blocks by Booking Status")
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with eda_col2:
+                # Monthly trend
+                st.write("**Monthly Block Trend**")
+                monthly_trend = filtered_data.groupby([filtered_data['AllotmentDate'].dt.to_period('M')])['BlockSize'].sum().reset_index()
+                monthly_trend['AllotmentDate'] = monthly_trend['AllotmentDate'].astype(str)
+                fig = px.line(monthly_trend, x='AllotmentDate', y='BlockSize', 
+                              title="Monthly Block Trend")
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Top companies
+            st.write("**Top 10 Companies by Total Blocks**")
+            top_companies = filtered_data.groupby('CompanyName')['BlockSize'].sum().nlargest(10).reset_index()
+            fig = px.bar(top_companies, x='BlockSize', y='CompanyName', 
+                         orientation='h', title="Top Companies")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Weekly pattern
+            st.write("**Weekly Pattern Analysis**")
+            if 'WeekDay' in filtered_data.columns:
+                weekly_pattern = filtered_data.groupby('WeekDay')['BlockSize'].sum().reset_index()
+                fig = px.bar(weekly_pattern, x='WeekDay', y='BlockSize', 
+                             title="Blocks by Day of Week")
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Calendar Heatmap
+            st.subheader("📅 Calendar Heatmap")
+            create_calendar_heatmap(filtered_data)
+            
+            # Data table
+            st.subheader("📋 Filtered Data")
+            st.dataframe(filtered_data, use_container_width=True)
     
-    with filter_col2:
-        companies = ['All'] + sorted(block_data['CompanyName'].unique().tolist())
-        company_filter = st.selectbox("Company", companies)
+    with block_subtabs[1]:  # Block Dashboard
+        st.subheader("📊 Block Dashboard")
+        
+        # Get block data
+        if database_available:
+            db = get_database()
+            block_data = db.get_block_data()
+        else:
+            block_data = pd.DataFrame()
+        
+        if block_data.empty:
+            st.warning("⚠️ No block data available. Please load data in the Block EDA tab first.")
+        else:
+            # KPI Dashboard
+            st.subheader("🎯 Key Performance Indicators")
+            
+            # Calculate KPIs
+            total_blocks = block_data['BlockSize'].sum()
+            confirmed_blocks = block_data[block_data['BookingStatus'].isin(['ACT', 'DEF'])]['BlockSize'].sum()
+            prospect_blocks = block_data[block_data['BookingStatus'].isin(['PSP', 'TEN'])]['BlockSize'].sum()
+            
+            conversion_rate = (confirmed_blocks / total_blocks * 100) if total_blocks > 0 else 0
+            
+            kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+            
+            with kpi_col1:
+                st.metric(
+                    "Total Blocks", 
+                    f"{total_blocks:,}",
+                    help="Total number of room blocks"
+                )
+            
+            with kpi_col2:
+                st.metric(
+                    "Confirmed Blocks", 
+                    f"{confirmed_blocks:,}",
+                    help="ACT + DEF status blocks"
+                )
+            
+            with kpi_col3:
+                st.metric(
+                    "Prospect Blocks", 
+                    f"{prospect_blocks:,}",
+                    help="PSP + TEN status blocks"
+                )
+            
+            with kpi_col4:
+                st.metric(
+                    "Conversion Rate", 
+                    f"{conversion_rate:.1f}%",
+                    help="Confirmed blocks / Total blocks"
+                )
+            
+            # Interactive Charts
+            st.subheader("📊 Interactive Analytics")
+            
+            chart_col1, chart_col2 = st.columns(2)
+            
+            with chart_col1:
+                # Time series chart
+                st.write("**Block Booking Timeline**")
+                daily_blocks = block_data.groupby(['AllotmentDate', 'BookingStatus'])['BlockSize'].sum().reset_index()
+                fig = px.line(daily_blocks, x='AllotmentDate', y='BlockSize', 
+                              color='BookingStatus', title="Daily Block Bookings by Status")
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with chart_col2:
+                # Sales rep performance
+                st.write("**Sales Rep Performance**")
+                rep_performance = block_data.groupby('SrepCode')['BlockSize'].sum().nlargest(10).reset_index()
+                fig = px.bar(rep_performance, x='SrepCode', y='BlockSize', 
+                             title="Top 10 Sales Reps by Blocks")
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Business Mix Analysis
+            st.write("**Business Mix Analysis**")
+            business_mix = block_data.groupby('BookingStatus').agg({
+                'BlockSize': ['sum', 'count', 'mean']
+            }).round(2)
+            business_mix.columns = ['Total Blocks', 'Number of Bookings', 'Average Block Size']
+            business_mix = business_mix.reset_index()
+            
+            st.dataframe(business_mix, use_container_width=True)
+            
+            # Forecast Pipeline
+            st.subheader("🔮 Pipeline Analysis")
+            
+            pipeline_col1, pipeline_col2 = st.columns(2)
+            
+            with pipeline_col1:
+                # Future bookings
+                future_bookings = block_data[block_data['BeginDate'] > pd.Timestamp.now()]
+                if not future_bookings.empty:
+                    future_by_month = future_bookings.groupby(future_bookings['BeginDate'].dt.to_period('M'))['BlockSize'].sum().reset_index()
+                    future_by_month['BeginDate'] = future_by_month['BeginDate'].astype(str)
+                    fig = px.bar(future_by_month, x='BeginDate', y='BlockSize', 
+                                 title="Future Bookings by Month")
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No future bookings in the data")
+            
+            with pipeline_col2:
+                # Status progression
+                status_order = ['TEN', 'PSP', 'DEF', 'ACT']
+                status_progression = block_data['BookingStatus'].value_counts().reindex(status_order, fill_value=0)
+                fig = px.funnel(x=status_progression.values, y=status_progression.index)
+                fig.update_layout(title="Booking Status Funnel")
+                st.plotly_chart(fig, use_container_width=True)
     
-    with filter_col3:
-        date_range_filter = st.date_input(
-            "Date Range",
-            value=(block_data['AllotmentDate'].min(), block_data['AllotmentDate'].max()),
-            min_value=block_data['AllotmentDate'].min(),
-            max_value=block_data['AllotmentDate'].max()
+    with block_subtabs[2]:  # Blocks Last Year
+        st.subheader("📅 Blocks Last Year")
+        
+        # Upload section for last year's block data
+        st.subheader("📤 Upload Last Year's Block Data")
+        
+        uploaded_last_year_file = st.file_uploader(
+            "Choose last year's block data TXT file",
+            type=['txt'],
+            help="Upload the TXT file containing last year's block data",
+            key="last_year_block_upload"
         )
-    
-    # Apply filters
-    filtered_data = block_data.copy()
-    
-    if status_filter:
-        filtered_data = filtered_data[filtered_data['BookingStatus'].isin(status_filter)]
-    
-    if company_filter != 'All':
-        filtered_data = filtered_data[filtered_data['CompanyName'] == company_filter]
-    
-    if len(date_range_filter) == 2:
-        start_date, end_date = date_range_filter
-        filtered_data = filtered_data[
-            (filtered_data['AllotmentDate'] >= pd.Timestamp(start_date)) &
-            (filtered_data['AllotmentDate'] <= pd.Timestamp(end_date))
-        ]
-    
-    st.subheader("📊 Exploratory Data Analysis")
-    
-    # EDA Charts
-    eda_col1, eda_col2 = st.columns(2)
-    
-    with eda_col1:
-        # Booking status distribution
-        st.write("**Booking Status Distribution**")
-        status_dist = filtered_data.groupby('BookingStatus')['BlockSize'].sum().reset_index()
-        fig = px.pie(status_dist, values='BlockSize', names='BookingStatus', 
-                     title="Blocks by Booking Status")
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with eda_col2:
-        # Monthly trend
-        st.write("**Monthly Block Trend**")
-        monthly_trend = filtered_data.groupby([filtered_data['AllotmentDate'].dt.to_period('M')])['BlockSize'].sum().reset_index()
-        monthly_trend['AllotmentDate'] = monthly_trend['AllotmentDate'].astype(str)
-        fig = px.line(monthly_trend, x='AllotmentDate', y='BlockSize', 
-                      title="Monthly Block Trend")
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Top companies
-    st.write("**Top 10 Companies by Total Blocks**")
-    top_companies = filtered_data.groupby('CompanyName')['BlockSize'].sum().nlargest(10).reset_index()
-    fig = px.bar(top_companies, x='BlockSize', y='CompanyName', 
-                 orientation='h', title="Top Companies")
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Weekly pattern
-    st.write("**Weekly Pattern Analysis**")
-    if 'WeekDay' in filtered_data.columns:
-        weekly_pattern = filtered_data.groupby('WeekDay')['BlockSize'].sum().reset_index()
-        fig = px.bar(weekly_pattern, x='WeekDay', y='BlockSize', 
-                     title="Blocks by Day of Week")
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Calendar Heatmap
-    st.subheader("📅 Calendar Heatmap")
-    create_calendar_heatmap(filtered_data)
-    
-    # Data table
-    st.subheader("📋 Filtered Data")
-    st.dataframe(filtered_data, use_container_width=True)
+        
+        if uploaded_last_year_file is not None:
+            # Save uploaded file
+            upload_path = Path("uploaded_last_year_blocks.txt")
+            with open(upload_path, "wb") as f:
+                f.write(uploaded_last_year_file.getbuffer())
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🔄 Convert & Load Last Year Data", key="convert_last_year_blocks"):
+                    try:
+                        # Import the last year block converter
+                        from converters.last_year_block_converter import run_last_year_block_conversion
+                        
+                        with st.spinner("Converting and loading last year's block data..."):
+                            # Run conversion and database loading
+                            df, output_path, db_success = run_last_year_block_conversion(
+                                str(upload_path), 
+                                load_to_db=True
+                            )
+                            
+                            if db_success:
+                                st.success(f"✅ Successfully converted and loaded {len(df)} last year block records!")
+                                st.info(f"📄 Data saved to: {output_path}")
+                                
+                                # Show summary
+                                col_a, col_b, col_c = st.columns(3)
+                                with col_a:
+                                    st.metric("Records Loaded", len(df))
+                                with col_b:
+                                    st.metric("Total Blocks", f"{df['BlockSize'].sum():,}")
+                                with col_c:
+                                    st.metric("Companies", df['CompanyName'].nunique())
+                                
+                                # Force refresh of the page
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to load data to database")
+                                
+                    except Exception as e:
+                        st.error(f"❌ Error processing last year data: {str(e)}")
+            
+            with col2:
+                st.info("💡 This will convert the TXT file and load it into the database for analysis")
+        
+        st.markdown("---")
+        
+        # Toggle between current and last year data
+        col1, col2 = st.columns(2)
+        with col1:
+            data_source = st.selectbox(
+                "Data Source:",
+                ["Current Year Data", "Last Year Data"],
+                help="Choose which dataset to analyze"
+            )
+        
+        # Get block data based on selection
+        if database_available:
+            db = get_database()
+            if data_source == "Last Year Data":
+                block_data = db.get_last_year_block_data()
+                data_year_label = "Last Year's"
+            else:
+                block_data = db.get_block_data()
+                data_year_label = "Current"
+        else:
+            block_data = pd.DataFrame()
+        
+        if block_data.empty:
+            if data_source == "Last Year Data":
+                st.warning("⚠️ No last year block data available. Please upload and load last year's block data above.")
+            else:
+                st.warning("⚠️ No current block data available. Please load data in the Block EDA tab first.")
+        else:
+            # Get year information from the data
+            if 'AllotmentDate' in block_data.columns:
+                data_years = sorted(block_data['AllotmentDate'].dt.year.unique())
+                if data_source == "Last Year Data":
+                    st.success(f"📊 Found {len(block_data)} last year block records for {data_years}")
+                else:
+                    current_year = datetime.now().year
+                    last_year = current_year - 1
+                    last_year_data = block_data[block_data['AllotmentDate'].dt.year == last_year]
+                    
+                    if last_year_data.empty:
+                        st.info(f"💡 No block data found for {last_year}. The dataset contains data from {data_years[0] if data_years else 'N/A'} to {data_years[-1] if data_years else 'N/A'}.")
+                        last_year_data = block_data  # Use all available data
+                    block_data = last_year_data
+            # Data overview
+            years_in_data = block_data['AllotmentDate'].dt.year.unique() if 'AllotmentDate' in block_data.columns else []
+            year_display = f"{data_year_label} Data ({min(years_in_data)} - {max(years_in_data)})" if len(years_in_data) > 0 else f"{data_year_label} Data"
+            
+            st.subheader(f"🔍 {year_display} Overview")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total_blocks = block_data['BlockSize'].sum()
+                st.metric("Total Blocks", f"{total_blocks:,}")
+            
+            with col2:
+                unique_companies = block_data['CompanyName'].nunique()
+                st.metric("Unique Companies", unique_companies)
+            
+            with col3:
+                confirmed_blocks = block_data[block_data['BookingStatus'].isin(['ACT', 'DEF'])]['BlockSize'].sum()
+                st.metric("Confirmed Blocks", f"{confirmed_blocks:,}")
+            
+            with col4:
+                conversion_rate = (confirmed_blocks / total_blocks * 100) if total_blocks > 0 else 0
+                st.metric("Conversion Rate", f"{conversion_rate:.1f}%")
+            
+            # Monthly comparison
+            st.subheader(f"📈 {data_year_label} Monthly Analysis")
+            
+            monthly_data = block_data.groupby([block_data['AllotmentDate'].dt.month, 'BookingStatus'])['BlockSize'].sum().reset_index()
+            monthly_data['Month'] = monthly_data['AllotmentDate'].apply(lambda x: pd.Timestamp(year=2000, month=x, day=1).strftime('%B'))
+            
+            fig = px.bar(monthly_data, x='Month', y='BlockSize', color='BookingStatus',
+                        title=f"Monthly Blocks by Status - {data_year_label}")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Top companies
+            st.subheader(f"🏢 Top Companies - {data_year_label}")
+            top_companies = block_data.groupby('CompanyName')['BlockSize'].sum().nlargest(10).reset_index()
+            fig = px.bar(top_companies, x='BlockSize', y='CompanyName', 
+                        orientation='h', title=f"Top 10 Companies by Blocks - {data_year_label}")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Data table
+            st.subheader(f"📋 {data_year_label} Data Table")
+            st.dataframe(block_data.head(100), use_container_width=True)
 
 def block_dashboard_tab():
     """Block Dashboard tab with KPIs and interactive charts"""
@@ -2835,20 +3173,25 @@ def events_analysis_tab():
                 # Occupancy chart for event periods
                 st.subheader("📊 Daily Occupancy During Events")
                 
-                # Create occupancy chart with event overlays and block size trend
-                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                # Filter occupancy data from today onwards
+                today = datetime.now().date()
+                occupancy_filtered = occupancy_data[occupancy_data['Date'].dt.date >= today].copy()
                 
-                # Add occupancy line (right axis)
-                fig.add_trace(go.Scatter(
-                    x=occupancy_data['Date'],
-                    y=occupancy_data[occ_column],
-                    mode='lines',
-                    name='Occupancy %',
-                    line=dict(color='blue', width=2),
-                    yaxis='y2'
-                ))
+                if occupancy_filtered.empty:
+                    st.warning("No occupancy data available from today onwards.")
+                else:
+                    # Create occupancy chart with event overlays and block size trend
+                    fig = make_subplots(specs=[[{"secondary_y": True}]])
                 
-                # Add block size trend line if block data is available (left axis)
+                    # Add occupancy line (right axis) - using filtered data
+                    fig.add_trace(go.Scatter(
+                        x=occupancy_filtered['Date'],
+                        y=occupancy_filtered[occ_column],
+                        mode='lines',
+                        name='Occupancy %',
+                        line=dict(color='blue', width=2),
+                        yaxis='y2'
+                    ))                # Add block size trend line if block data is available (left axis)
                 if not block_data.empty and 'AllotmentDate' in block_data.columns and 'BlockSize' in block_data.columns:
                     # Prepare block data - group by date and sum block sizes
                     block_daily = block_data.groupby(block_data['AllotmentDate'].dt.date)['BlockSize'].sum().reset_index()
@@ -3100,25 +3443,45 @@ def entered_on_arrivals_tab():
             # Calculate both split (monthly) and original (total booking) metrics
             total_bookings = len(entered_on_data['RESV_ID'].unique()) if 'RESV_ID' in entered_on_data.columns else len(entered_on_data)
             
-            # Calculate totals from monthly columns instead of AMOUNT_IN_MONTH
+            # Define all possible monthly columns
             monthly_amount_cols = ['AUG2025_AMT', 'SEP2025_AMT', 'OCT2025_AMT', 'NOV2025_AMT', 'DEC2025_AMT', 'JAN2026_AMT', 'FEB2026_AMT', 'MAR2026_AMT', 'APR2026_AMT', 'MAY2026_AMT', 'JUN2026_AMT', 'JUL2026_AMT', 'AUG2026_AMT', 'SEP2026_AMT', 'OCT2026_AMT', 'NOV2026_AMT', 'DEC2026_AMT']
             monthly_nights_cols = ['AUG2025', 'SEP2025', 'OCT2025', 'NOV2025', 'DEC2025', 'JAN2026', 'FEB2026', 'MAR2026', 'APR2026', 'MAY2026', 'JUN2026', 'JUL2026', 'AUG2026', 'SEP2026', 'OCT2026', 'NOV2026', 'DEC2026']
             
-            available_amount_cols = [col for col in monthly_amount_cols if col in entered_on_data.columns]
-            available_nights_cols = [col for col in monthly_nights_cols if col in entered_on_data.columns]
-            
-            # Calculate totals from monthly matrix columns
-            if available_amount_cols:
-                split_amount = entered_on_data[available_amount_cols].sum().sum()
-            else:
-                # Fallback to AMOUNT_IN_MONTH if monthly columns don't exist
-                split_amount = entered_on_data['AMOUNT_IN_MONTH'].sum() if 'AMOUNT_IN_MONTH' in entered_on_data.columns else 0
+            # Calculate totals based on selected month filter
+            if selected_month != 'All Months':
+                # For specific month, use only that month's columns
+                selected_col = selected_month.replace(' ', '')  # Convert "AUG 2025" to "AUG2025"
+                amount_col = f"{selected_col}_AMT"
+                nights_col = selected_col
                 
-            if available_nights_cols:
-                split_nights = entered_on_data[available_nights_cols].sum().sum()
+                # Set available columns to just the selected month
+                available_amount_cols = [amount_col] if amount_col in entered_on_data.columns else []
+                available_nights_cols = [nights_col] if nights_col in entered_on_data.columns else []
+                
+                if amount_col in entered_on_data.columns and nights_col in entered_on_data.columns:
+                    split_amount = entered_on_data[amount_col].sum()
+                    split_nights = entered_on_data[nights_col].sum()
+                else:
+                    # Fallback if monthly columns don't exist
+                    split_amount = entered_on_data['AMOUNT_IN_MONTH'].sum() if 'AMOUNT_IN_MONTH' in entered_on_data.columns else 0
+                    split_nights = entered_on_data['NIGHTS_IN_MONTH'].sum() if 'NIGHTS_IN_MONTH' in entered_on_data.columns else 0
             else:
-                # Fallback to NIGHTS_IN_MONTH if monthly columns don't exist
-                split_nights = entered_on_data['NIGHTS_IN_MONTH'].sum() if 'NIGHTS_IN_MONTH' in entered_on_data.columns else 0
+                # For "All Months", sum all available monthly columns
+                available_amount_cols = [col for col in monthly_amount_cols if col in entered_on_data.columns]
+                available_nights_cols = [col for col in monthly_nights_cols if col in entered_on_data.columns]
+                
+                # Calculate totals from monthly matrix columns
+                if available_amount_cols:
+                    split_amount = entered_on_data[available_amount_cols].sum().sum()
+                else:
+                    # Fallback to AMOUNT_IN_MONTH if monthly columns don't exist
+                    split_amount = entered_on_data['AMOUNT_IN_MONTH'].sum() if 'AMOUNT_IN_MONTH' in entered_on_data.columns else 0
+                    
+                if available_nights_cols:
+                    split_nights = entered_on_data[available_nights_cols].sum().sum()
+                else:
+                    # Fallback to NIGHTS_IN_MONTH if monthly columns don't exist
+                    split_nights = entered_on_data['NIGHTS_IN_MONTH'].sum() if 'NIGHTS_IN_MONTH' in entered_on_data.columns else 0
             
             split_adr = split_amount / split_nights if split_nights > 0 else 0
             
@@ -3648,64 +4011,26 @@ def entered_on_arrivals_tab():
             
             # 18. Monthly Matrix View - Aug 2025 to Dec 2026
             st.markdown("### 📊 Monthly Matrix View (Aug 2025 - Dec 2026)")
+            st.markdown("**Note:** This view obeys the Month Filter selection from above. Use 'All Months' to see full matrix.")
             
-            # Create dynamic date mapping for monthly columns
-            from datetime import datetime
-            monthly_date_mapping = {
-                'AUG2025': datetime(2025, 8, 1), 'SEP2025': datetime(2025, 9, 1), 'OCT2025': datetime(2025, 10, 1),
-                'NOV2025': datetime(2025, 11, 1), 'DEC2025': datetime(2025, 12, 1), 'JAN2026': datetime(2026, 1, 1),
-                'FEB2026': datetime(2026, 2, 1), 'MAR2026': datetime(2026, 3, 1), 'APR2026': datetime(2026, 4, 1),
-                'MAY2026': datetime(2026, 5, 1), 'JUN2026': datetime(2026, 6, 1), 'JUL2026': datetime(2026, 7, 1),
-                'AUG2026': datetime(2026, 8, 1), 'SEP2026': datetime(2026, 9, 1), 'OCT2026': datetime(2026, 10, 1),
-                'NOV2026': datetime(2026, 11, 1), 'DEC2026': datetime(2026, 12, 1)
-            }
+            # Define all monthly columns
+            all_monthly_columns = ['AUG2025', 'SEP2025', 'OCT2025', 'NOV2025', 'DEC2025', 'JAN2026', 'FEB2026', 'MAR2026', 'APR2026', 'MAY2026', 'JUN2026', 'JUL2026', 'AUG2026', 'SEP2026', 'OCT2026', 'NOV2026', 'DEC2026']
+            all_amount_columns = ['AUG2025_AMT', 'SEP2025_AMT', 'OCT2025_AMT', 'NOV2025_AMT', 'DEC2025_AMT', 'JAN2026_AMT', 'FEB2026_AMT', 'MAR2026_AMT', 'APR2026_AMT', 'MAY2026_AMT', 'JUN2026_AMT', 'JUL2026_AMT', 'AUG2026_AMT', 'SEP2026_AMT', 'OCT2026_AMT', 'NOV2026_AMT', 'DEC2026_AMT']
             
-            # Add dynamic month selector
-            with st.expander("🔧 Dynamic Month Filter", expanded=False):
-                st.markdown("**Filter by specific months:**")
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    start_date = st.date_input(
-                        "Start Month", 
-                        value=datetime(2025, 8, 1),
-                        min_value=datetime(2025, 8, 1),
-                        max_value=datetime(2026, 12, 1),
-                        key="monthly_start_date"
-                    )
-                
-                with col2:
-                    end_date = st.date_input(
-                        "End Month",
-                        value=datetime(2026, 12, 1),
-                        min_value=datetime(2025, 8, 1),
-                        max_value=datetime(2026, 12, 1),
-                        key="monthly_end_date"
-                    )
-                
-                # Convert selected date range to applicable monthly columns
-                if start_date and end_date:
-                    selected_columns = []
-                    selected_amount_columns = []
-                    
-                    for col, date in monthly_date_mapping.items():
-                        if start_date <= date.date() <= end_date:
-                            selected_columns.append(col)
-                            selected_amount_columns.append(f"{col}_AMT")
-                    
-                    if selected_columns:
-                        st.success(f"📅 Selected months: {', '.join([col.replace('2025', ' 2025').replace('2026', ' 2026') for col in selected_columns])}")
-                    else:
-                        st.warning("No months selected in the specified range.")
-            
-            # Define monthly columns (keeping original functionality intact)
-            monthly_columns = ['AUG2025', 'SEP2025', 'OCT2025', 'NOV2025', 'DEC2025', 'JAN2026', 'FEB2026', 'MAR2026', 'APR2026', 'MAY2026', 'JUN2026', 'JUL2026', 'AUG2026', 'SEP2026', 'OCT2026', 'NOV2026', 'DEC2026']
-            amount_columns = ['AUG2025_AMT', 'SEP2025_AMT', 'OCT2025_AMT', 'NOV2025_AMT', 'DEC2025_AMT', 'JAN2026_AMT', 'FEB2026_AMT', 'MAR2026_AMT', 'APR2026_AMT', 'MAY2026_AMT', 'JUN2026_AMT', 'JUL2026_AMT', 'AUG2026_AMT', 'SEP2026_AMT', 'OCT2026_AMT', 'NOV2026_AMT', 'DEC2026_AMT']
-            
-            # Override with dynamic selection if available
-            if 'selected_columns' in locals() and selected_columns:
-                monthly_columns = selected_columns
-                amount_columns = selected_amount_columns
+            # Apply month filter logic to determine which columns to show
+            if selected_month != 'All Months':
+                # Show only the selected month
+                selected_col = selected_month.replace(' ', '')
+                if selected_col in all_monthly_columns:
+                    monthly_columns = [selected_col]
+                    amount_columns = [f"{selected_col}_AMT"]
+                else:
+                    monthly_columns = all_monthly_columns
+                    amount_columns = all_amount_columns
+            else:
+                # Show all months
+                monthly_columns = all_monthly_columns
+                amount_columns = all_amount_columns
             
             has_monthly_data = any(col in entered_on_data.columns for col in monthly_columns)
             has_amount_data = any(col in entered_on_data.columns for col in amount_columns)
@@ -3729,16 +4054,30 @@ def entered_on_arrivals_tab():
                         st.markdown("**Room Nights by Company and Month:**")
                         st.dataframe(nights_matrix, use_container_width=True)
                         
-                        # Create a heatmap for nights
+                        # Create a heatmap for nights with RED color and show numbers
                         try:
                             import plotly.express as px
-                            fig = px.imshow(nights_matrix.values, 
-                                          x=nights_matrix.columns, 
-                                          y=nights_matrix.index,
-                                          color_continuous_scale='Blues',
-                                          title="Room Nights Heatmap",
-                                          aspect='auto')
-                            fig.update_layout(height=500)
+                            import plotly.graph_objects as go
+                            
+                            # Create heatmap with custom colors and text
+                            fig = go.Figure(data=go.Heatmap(
+                                z=nights_matrix.values,
+                                x=nights_matrix.columns,
+                                y=nights_matrix.index,
+                                colorscale='Reds',  # Changed to red
+                                text=nights_matrix.values,  # Show numbers
+                                texttemplate="%{text}",
+                                textfont={"size": 10},
+                                hoverongaps=False,
+                                colorbar=dict(title="Number of Nights")
+                            ))
+                            
+                            fig.update_layout(
+                                title="Room Nights Heatmap",
+                                height=500,
+                                xaxis_title="Month",
+                                yaxis_title="Company"
+                            )
                             st.plotly_chart(fig, use_container_width=True)
                         except Exception as e:
                             st.warning(f"Could not create heatmap: {e}")
@@ -3758,16 +4097,30 @@ def entered_on_arrivals_tab():
                         st.markdown("**Revenue by Company and Month:**")
                         st.dataframe(display_matrix, use_container_width=True)
                         
-                        # Create a heatmap for revenue
+                        # Create a heatmap for revenue with RED color and show numbers
                         try:
                             import plotly.express as px
-                            fig = px.imshow(amount_matrix.values, 
-                                          x=amount_matrix.columns, 
-                                          y=amount_matrix.index,
-                                          color_continuous_scale='Greens',
-                                          title="Revenue Heatmap (AED)",
-                                          aspect='auto')
-                            fig.update_layout(height=500)
+                            import plotly.graph_objects as go
+                            
+                            # Create heatmap with custom colors and text
+                            fig = go.Figure(data=go.Heatmap(
+                                z=amount_matrix.values,
+                                x=amount_matrix.columns,
+                                y=amount_matrix.index,
+                                colorscale='Reds',  # Changed to red
+                                text=amount_matrix.values,  # Show numbers
+                                texttemplate="%{text:,.0f}",  # Format numbers with commas
+                                textfont={"size": 10},
+                                hoverongaps=False,
+                                colorbar=dict(title="Revenue (AED)")
+                            ))
+                            
+                            fig.update_layout(
+                                title="Revenue Heatmap (AED)",
+                                height=500,
+                                xaxis_title="Month",
+                                yaxis_title="Company"
+                            )
                             st.plotly_chart(fig, use_container_width=True)
                         except Exception as e:
                             st.warning(f"Could not create revenue heatmap: {e}")
@@ -6523,7 +6876,6 @@ def main():
             "ADR Analysis",
             "STR Report",
             "Block Analysis",
-            "Block Dashboard", 
             "Events Analysis",
             "Entered On & Arrivals",
             "Historical & Forecast",
@@ -6593,8 +6945,6 @@ def main():
         str_report_tab()
     elif current_tab == "Block Analysis":
         block_analysis_tab()
-    elif current_tab == "Block Dashboard":
-        block_dashboard_tab()
     elif current_tab == "Events Analysis":
         events_analysis_tab()
     elif current_tab == "Entered On & Arrivals":
