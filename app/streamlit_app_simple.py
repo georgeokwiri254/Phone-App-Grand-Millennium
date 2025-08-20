@@ -1113,7 +1113,7 @@ def daily_occupancy_tab():
 
 def style_variance_table(df, variance_col='Variance_%'):
     """
-    Apply conditional formatting to variance tables
+    Apply conditional formatting to variance tables - text color only
     """
     def color_variance(val):
         """Color variance percentages: green for positive, red for negative"""
@@ -1121,11 +1121,11 @@ def style_variance_table(df, variance_col='Variance_%'):
             try:
                 numeric_val = float(val.replace('%', ''))
                 if numeric_val > 0:
-                    return 'background-color: #d4edda; color: #155724'  # Green
+                    return 'color: #28a745; font-weight: bold'  # Green text
                 elif numeric_val < 0:
-                    return 'background-color: #f8d7da; color: #721c24'  # Red
+                    return 'color: #dc3545; font-weight: bold'  # Red text
                 else:
-                    return 'background-color: #e2e3e5; color: #383d41'  # Gray
+                    return 'color: #6c757d; font-weight: bold'  # Gray text
             except:
                 return ''
         return ''
@@ -1138,11 +1138,11 @@ def style_variance_table(df, variance_col='Variance_%'):
                 numeric_str = val.replace('AED', '').replace(',', '').strip()
                 numeric_val = float(numeric_str)
                 if numeric_val > 0:
-                    return 'background-color: #d4edda; color: #155724'  # Green
+                    return 'color: #28a745; font-weight: bold'  # Green text
                 elif numeric_val < 0:
-                    return 'background-color: #f8d7da; color: #721c24'  # Red
+                    return 'color: #dc3545; font-weight: bold'  # Red text
                 else:
-                    return 'background-color: #e2e3e5; color: #383d41'  # Gray
+                    return 'color: #6c757d; font-weight: bold'  # Gray text
             except:
                 return ''
         return ''
@@ -1155,11 +1155,11 @@ def style_variance_table(df, variance_col='Variance_%'):
 
 def create_delta_comparison(df, col1, col2, comparison_name, segment_col, granularity):
     """
-    Create delta comparison analysis with table and charts
+    Create enhanced delta comparison analysis with multiple charts and tables
     
     Args:
         df: DataFrame with segment data
-        col1: Primary column (trend line)
+        col1: Primary column (Business on Books Revenue - trend line)
         col2: Comparison column (bar chart)
         comparison_name: Name for the comparison
         segment_col: Segment column to use
@@ -1270,7 +1270,7 @@ def create_delta_comparison(df, col1, col2, comparison_name, segment_col, granul
             styled_segment = style_variance_table(segment_display)
             st.dataframe(styled_segment, use_container_width=True)
             
-            # Create segment chart
+            # Original segment chart (keeping existing)
             fig_segment = go.Figure()
             
             # Add bar chart for comparison column
@@ -1301,6 +1301,180 @@ def create_delta_comparison(df, col1, col2, comparison_name, segment_col, granul
             )
             
             st.plotly_chart(fig_segment, use_container_width=True)
+            
+            # Additional chart layouts
+            st.subheader(f"📊 Additional Segment Analysis Charts - {comparison_name}")
+            chart_col1, chart_col2 = st.columns(2)
+            
+            with chart_col1:
+                # 1. Enhanced Combination Chart - Bar + Line
+                fig_combo = go.Figure()
+                
+                # Add bar chart for comparison column
+                fig_combo.add_trace(go.Bar(
+                    x=segment_data[segment_col],
+                    y=segment_data[col2],
+                    name=col2.replace('_', ' '),
+                    marker_color='lightblue',
+                    opacity=0.7
+                ))
+                
+                # Add line chart for primary column
+                fig_combo.add_trace(go.Scatter(
+                    x=segment_data[segment_col],
+                    y=segment_data[col1],
+                    mode='lines+markers',
+                    name=col1.replace('_', ' '),
+                    line=dict(color='red', width=3),
+                    marker=dict(size=8)
+                ))
+                
+                fig_combo.update_layout(
+                    title=f'Revenue Comparison - {comparison_name}',
+                    xaxis_title='Segment',
+                    yaxis_title='Revenue (AED)',
+                    height=400,
+                    hovermode='x unified',
+                    showlegend=True
+                )
+                
+                st.plotly_chart(fig_combo, use_container_width=True)
+            
+            with chart_col2:
+                # 2. Variance Percentage Chart
+                fig_variance = px.bar(
+                    segment_data,
+                    x=segment_col,
+                    y='Variance_%',
+                    title=f'Variance Percentage - {comparison_name}',
+                    labels={'Variance_%': 'Variance %', segment_col: 'Segment'},
+                    color='Variance_%',
+                    color_continuous_scale=['red', 'gray', 'green'],
+                    color_continuous_midpoint=0
+                )
+                
+                fig_variance.update_layout(height=400)
+                st.plotly_chart(fig_variance, use_container_width=True)
+            
+            # Additional chart row
+            chart_col3, chart_col4 = st.columns(2)
+            
+            with chart_col3:
+                # 3. Absolute Variance Chart
+                fig_abs_variance = px.bar(
+                    segment_data,
+                    x=segment_col,
+                    y='Variance',
+                    title=f'Absolute Variance (AED) - {comparison_name}',
+                    labels={'Variance': 'Variance (AED)', segment_col: 'Segment'},
+                    color='Variance',
+                    color_continuous_scale=['red', 'gray', 'green'],
+                    color_continuous_midpoint=0
+                )
+                
+                fig_abs_variance.update_layout(height=400)
+                st.plotly_chart(fig_abs_variance, use_container_width=True)
+            
+            with chart_col4:
+                # 4. Pie Chart for Revenue Distribution
+                fig_pie = px.pie(
+                    segment_data,
+                    values=col1,
+                    names=segment_col,
+                    title=f'{col1.replace("_", " ")} Distribution',
+                    color_discrete_sequence=px.colors.qualitative.Set3
+                )
+                
+                fig_pie.update_layout(height=400)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # Third row of additional charts
+            chart_col5, chart_col6 = st.columns(2)
+            
+            with chart_col5:
+                # 5. Waterfall Chart for Variance
+                fig_waterfall = go.Figure(go.Waterfall(
+                    name="Variance Breakdown",
+                    orientation="v",
+                    measure=["relative"] * len(segment_data),
+                    x=segment_data[segment_col],
+                    y=segment_data['Variance'],
+                    connector={"line": {"color": "rgb(63, 63, 63)"}},
+                    text=[f"AED {x:,.0f}" for x in segment_data['Variance']],
+                    textposition="outside"
+                ))
+                
+                fig_waterfall.update_layout(
+                    title=f"Variance Waterfall - {comparison_name}",
+                    height=400,
+                    xaxis_title="Segment",
+                    yaxis_title="Variance (AED)"
+                )
+                
+                st.plotly_chart(fig_waterfall, use_container_width=True)
+            
+            with chart_col6:
+                # 6. Box Plot for Revenue Range Analysis
+                box_data = []
+                for segment in segment_data[segment_col]:
+                    segment_subset = df_analysis[df_analysis[segment_col] == segment]
+                    for _, row in segment_subset.iterrows():
+                        box_data.append({
+                            'Segment': segment,
+                            'BOB_Revenue': row[col1],
+                            'Comparison_Revenue': row[col2]
+                        })
+                
+                if box_data:
+                    box_df = pd.DataFrame(box_data)
+                    fig_box = go.Figure()
+                    
+                    fig_box.add_trace(go.Box(
+                        y=box_df['BOB_Revenue'],
+                        x=box_df['Segment'],
+                        name=col1.replace('_', ' '),
+                        boxpoints='all',
+                        jitter=0.3,
+                        pointpos=-1.8
+                    ))
+                    
+                    fig_box.add_trace(go.Box(
+                        y=box_df['Comparison_Revenue'],
+                        x=box_df['Segment'],
+                        name=col2.replace('_', ' '),
+                        boxpoints='all',
+                        jitter=0.3,
+                        pointpos=1.8
+                    ))
+                    
+                    fig_box.update_layout(
+                        title=f"Revenue Distribution - {comparison_name}",
+                        height=400,
+                        xaxis_title="Segment",
+                        yaxis_title="Revenue (AED)",
+                        boxmode='group'
+                    )
+                    
+                    st.plotly_chart(fig_box, use_container_width=True)
+            
+            # Performance ranking table
+            st.subheader(f"📈 Performance Ranking - {comparison_name}")
+            ranking_data = segment_data.copy()
+            ranking_data['Performance_Rank'] = ranking_data['Variance_%'].rank(ascending=False, method='dense').astype(int)
+            ranking_data = ranking_data.sort_values('Performance_Rank')
+            
+            ranking_display = ranking_data[[segment_col, 'Performance_Rank', 'Variance_%', 'Variance']].copy()
+            ranking_display['Variance'] = ranking_display['Variance'].apply(lambda x: f"AED {x:,.0f}")
+            ranking_display['Variance_%'] = ranking_display['Variance_%'].apply(lambda x: f"{x:.1f}%")
+            ranking_display = ranking_display.rename(columns={
+                segment_col: 'Segment',
+                'Performance_Rank': 'Rank',
+                'Variance_%': 'Variance %',
+                'Variance': 'Variance (AED)'
+            })
+            
+            styled_ranking = style_variance_table(ranking_display, variance_col='Variance %')
+            st.dataframe(styled_ranking, use_container_width=True)
             
         # Variance summary
         st.subheader(f"📊 Variance Summary - {comparison_name}")
@@ -1487,12 +1661,20 @@ def segment_analysis_tab():
         
         with delta_col1:
             # Segment type toggle
-            use_merged_delta = st.checkbox(
-                "Use Merged Segments",
-                value=True,
-                help="Use grouped segments (Retail, Corporate, etc.) vs original segments",
-                key="delta_merged_toggle"
+            segment_type = st.radio(
+                "Segment Type:",
+                ["Merged Segments", "Unmerged Segments"],
+                index=0,
+                help="Merged: Retail, Groups | Unmerged: Managed Local, Tour, Unmanaged, Package",
+                key="delta_segment_type"
             )
+            use_merged_delta = segment_type == "Merged Segments"
+            
+            # Show segment categories info
+            if use_merged_delta:
+                st.info("📊 **Merged**: Retail, Groups")
+            else:
+                st.info("📋 **Unmerged**: Managed Local, Tour, Unmanaged, Package")
         
         with delta_col2:
             # Month filter
@@ -1568,16 +1750,295 @@ def segment_analysis_tab():
         
         st.markdown("---")
         
-        # Section 3: Budget vs BOB
-        st.subheader("📊 Section 3: Budget This Year vs Business on Books")
+        # Section 3: BOB vs Budget (Fixed variance calculation)
+        st.subheader("📊 Section 3: Business on Books vs Budget This Year")
         create_delta_comparison(
             delta_df,
-            'Budget_This_Year_Revenue',
             'Business_on_the_Books_Revenue',
-            'Budget vs BOB', 
+            'Budget_This_Year_Revenue',
+            'BOB vs Budget', 
             segment_col,
             analysis_granularity
         )
+        
+        # Add comprehensive individual segment analysis for all 15 segments
+        st.markdown("---")
+        st.subheader("🎯 Detailed Individual Segment Analysis")
+        
+        # Convert revenue columns to numeric if they're strings
+        revenue_columns = [
+            'Business_on_the_Books_Revenue',
+            'Business_on_the_Books_Same_Time_Last_Year_Revenue', 
+            'Full_Month_Last_Year_Revenue',
+            'Budget_This_Year_Revenue'
+        ]
+        
+        for col in revenue_columns:
+            if col in delta_df.columns:
+                if delta_df[col].dtype == 'object':  # String column
+                    delta_df[col] = pd.to_numeric(delta_df[col], errors='coerce').fillna(0)
+        
+        # Get all 15 unique segments
+        all_segments = sorted(delta_df['Segment'].unique())
+        
+        # Segment type toggle for detailed analysis
+        st.markdown("### 🔄 Segment Type Selection")
+        detail_col1, detail_col2 = st.columns(2)
+        
+        with detail_col1:
+            segment_detail_type = st.radio(
+                "Choose Analysis Type:",
+                ["All 15 Individual Segments", "Merged Segments Only"],
+                index=0,
+                help="All 15: Complete individual segment breakdown | Merged: Aggregated view",
+                key="segment_detail_type"
+            )
+        
+        with detail_col2:
+            if segment_detail_type == "All 15 Individual Segments":
+                st.info(f"📋 **Analyzing all {len(all_segments)} segments individually**")
+                segments_to_analyze = all_segments
+                analysis_segment_col = 'Segment'
+            else:
+                st.info("📊 **Analyzing merged segments only**")
+                segments_to_analyze = sorted(delta_df['MergedSegment'].unique()) if 'MergedSegment' in delta_df.columns else all_segments
+                analysis_segment_col = 'MergedSegment' if 'MergedSegment' in delta_df.columns else 'Segment'
+        
+        # Show available segments
+        with st.expander(f"📋 View All {len(segments_to_analyze)} Segments"):
+            seg_cols = st.columns(3)
+            for i, segment in enumerate(segments_to_analyze):
+                with seg_cols[i % 3]:
+                    st.write(f"{i+1:2d}. {segment}")
+        
+        # Individual segment analysis for each of the three sections
+        for section_num, (section_title, col1_name, col2_name, comparison_name) in enumerate([
+            ("Section 1: Business on Books vs Same Time Last Year", 
+             'Business_on_the_Books_Revenue', 
+             'Business_on_the_Books_Same_Time_Last_Year_Revenue', 
+             'BOB vs STLY'),
+            ("Section 2: Business on Books vs Full Month Last Year", 
+             'Business_on_the_Books_Revenue', 
+             'Full_Month_Last_Year_Revenue', 
+             'BOB vs FMLY'),
+            ("Section 3: Business on Books vs Budget This Year", 
+             'Business_on_the_Books_Revenue', 
+             'Budget_This_Year_Revenue', 
+             'BOB vs Budget')
+        ], 1):
+            
+            st.markdown(f"### 📈 {section_title} - Individual Segment Details")
+            
+            # Create comprehensive analysis for each segment
+            segment_summary_data = []
+            
+            for segment in segments_to_analyze:
+                segment_data = delta_df[delta_df[analysis_segment_col] == segment]
+                
+                if not segment_data.empty:
+                    # Calculate totals for this segment
+                    col1_total = segment_data[col1_name].sum()
+                    col2_total = segment_data[col2_name].sum()
+                    variance = col1_total - col2_total
+                    variance_pct = (variance / col2_total * 100) if col2_total != 0 else 0
+                    
+                    segment_summary_data.append({
+                        'Segment': segment,
+                        col1_name: col1_total,
+                        col2_name: col2_total,
+                        'Variance': variance,
+                        'Variance_%': variance_pct,
+                        'Months_Count': len(segment_data)
+                    })
+            
+            # Create summary DataFrame
+            segment_summary_df = pd.DataFrame(segment_summary_data)
+            
+            if not segment_summary_df.empty:
+                # Sort by variance percentage
+                segment_summary_df = segment_summary_df.sort_values('Variance_%', ascending=False)
+                
+                # Display comprehensive table
+                display_df = segment_summary_df.copy()
+                display_df[col1_name] = display_df[col1_name].apply(lambda x: f"AED {x:,.0f}")
+                display_df[col2_name] = display_df[col2_name].apply(lambda x: f"AED {x:,.0f}")
+                display_df['Variance'] = display_df['Variance'].apply(lambda x: f"AED {x:,.0f}")
+                display_df['Variance_%'] = display_df['Variance_%'].apply(lambda x: f"{x:.1f}%")
+                
+                # Rename columns for better display
+                display_df = display_df.rename(columns={
+                    col1_name: col1_name.replace('_', ' '),
+                    col2_name: col2_name.replace('_', ' '),
+                    'Months_Count': 'Data Points'
+                })
+                
+                st.write(f"**📊 {comparison_name} - All Segments Comparison Table:**")
+                styled_summary = style_variance_table(display_df, variance_col='Variance_%')
+                st.dataframe(styled_summary, use_container_width=True)
+                
+                # Create comprehensive charts
+                chart_row1_col1, chart_row1_col2 = st.columns(2)
+                
+                with chart_row1_col1:
+                    # Bar chart comparing the two metrics
+                    fig_comparison = go.Figure()
+                    
+                    fig_comparison.add_trace(go.Bar(
+                        x=segment_summary_df['Segment'],
+                        y=segment_summary_df[col1_name],
+                        name=col1_name.replace('_', ' '),
+                        marker_color='lightblue',
+                        opacity=0.8
+                    ))
+                    
+                    fig_comparison.add_trace(go.Bar(
+                        x=segment_summary_df['Segment'],
+                        y=segment_summary_df[col2_name],
+                        name=col2_name.replace('_', ' '),
+                        marker_color='orange',
+                        opacity=0.8
+                    ))
+                    
+                    fig_comparison.update_layout(
+                        title=f'{comparison_name} - Revenue Comparison',
+                        xaxis_title='Segment',
+                        yaxis_title='Revenue (AED)',
+                        height=500,
+                        barmode='group',
+                        hovermode='x unified',
+                        xaxis={'tickangle': 45}
+                    )
+                    
+                    st.plotly_chart(fig_comparison, use_container_width=True)
+                
+                with chart_row1_col2:
+                    # Variance percentage chart
+                    fig_variance = px.bar(
+                        segment_summary_df,
+                        x='Segment',
+                        y='Variance_%',
+                        title=f'{comparison_name} - Variance Percentage',
+                        labels={'Variance_%': 'Variance %', 'Segment': 'Segment'},
+                        color='Variance_%',
+                        color_continuous_scale=['red', 'white', 'green'],
+                        color_continuous_midpoint=0,
+                        height=500
+                    )
+                    
+                    fig_variance.update_layout(xaxis={'tickangle': 45})
+                    st.plotly_chart(fig_variance, use_container_width=True)
+                
+                # Second row of charts
+                chart_row2_col1, chart_row2_col2 = st.columns(2)
+                
+                with chart_row2_col1:
+                    # Absolute variance chart
+                    fig_abs_variance = px.bar(
+                        segment_summary_df,
+                        x='Segment',
+                        y='Variance',
+                        title=f'{comparison_name} - Absolute Variance (AED)',
+                        labels={'Variance': 'Variance (AED)', 'Segment': 'Segment'},
+                        color='Variance',
+                        color_continuous_scale=['red', 'white', 'green'],
+                        color_continuous_midpoint=0,
+                        height=400
+                    )
+                    
+                    fig_abs_variance.update_layout(xaxis={'tickangle': 45})
+                    st.plotly_chart(fig_abs_variance, use_container_width=True)
+                
+                with chart_row2_col2:
+                    # Performance ranking
+                    ranking_df = segment_summary_df.copy()
+                    ranking_df['Rank'] = ranking_df['Variance_%'].rank(ascending=False, method='dense').astype(int)
+                    ranking_df = ranking_df.sort_values('Rank')
+                    
+                    # Ensure size values are positive for scatter plot
+                    ranking_df['Size_Value'] = ranking_df[col1_name].abs() + 100
+                    
+                    fig_ranking = px.scatter(
+                        ranking_df,
+                        x='Rank',
+                        y='Variance_%',
+                        size='Size_Value',
+                        hover_data={'Segment': True, 'Variance': ':.0f'},
+                        title=f'{comparison_name} - Performance Ranking',
+                        labels={'Variance_%': 'Variance %', 'Rank': 'Performance Rank'},
+                        height=400
+                    )
+                    
+                    # Add segment labels
+                    for _, row in ranking_df.iterrows():
+                        fig_ranking.add_annotation(
+                            x=row['Rank'],
+                            y=row['Variance_%'],
+                            text=row['Segment'][:8] + "..." if len(row['Segment']) > 8 else row['Segment'],
+                            showarrow=True,
+                            arrowhead=2,
+                            arrowsize=1,
+                            arrowwidth=1,
+                            font=dict(size=8)
+                        )
+                    
+                    st.plotly_chart(fig_ranking, use_container_width=True)
+                
+                # Summary metrics for this section
+                st.markdown(f"**📈 {comparison_name} Summary Metrics:**")
+                metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
+                
+                total_col1 = segment_summary_df[col1_name].sum()
+                total_col2 = segment_summary_df[col2_name].sum()
+                total_variance = segment_summary_df['Variance'].sum()
+                avg_variance_pct = segment_summary_df['Variance_%'].mean()
+                
+                with metrics_col1:
+                    st.metric(
+                        label=col1_name.replace('_', ' '),
+                        value=f"AED {total_col1:,.0f}"
+                    )
+                
+                with metrics_col2:
+                    st.metric(
+                        label=col2_name.replace('_', ' '),
+                        value=f"AED {total_col2:,.0f}"
+                    )
+                
+                with metrics_col3:
+                    delta_color = "normal" if total_variance >= 0 else "inverse"
+                    st.metric(
+                        label="Total Variance",
+                        value=f"AED {total_variance:,.0f}",
+                        delta=f"{(total_variance/total_col2*100) if total_col2 != 0 else 0:.1f}%"
+                    )
+                
+                with metrics_col4:
+                    st.metric(
+                        label="Avg Variance %",
+                        value=f"{avg_variance_pct:.1f}%"
+                    )
+                
+                # Top and bottom performers
+                st.markdown(f"**🏆 {comparison_name} - Top & Bottom Performers:**")
+                perf_col1, perf_col2 = st.columns(2)
+                
+                with perf_col1:
+                    st.markdown("**🥇 Top 3 Performers (Highest Variance %):**")
+                    top_performers = segment_summary_df.head(3)[['Segment', 'Variance_%']].copy()
+                    top_performers['Variance_%'] = top_performers['Variance_%'].apply(lambda x: f"{x:.1f}%")
+                    st.dataframe(top_performers, hide_index=True, use_container_width=True)
+                
+                with perf_col2:
+                    st.markdown("**🥉 Bottom 3 Performers (Lowest Variance %):**")
+                    bottom_performers = segment_summary_df.tail(3)[['Segment', 'Variance_%']].copy()
+                    bottom_performers['Variance_%'] = bottom_performers['Variance_%'].apply(lambda x: f"{x:.1f}%")
+                    st.dataframe(bottom_performers, hide_index=True, use_container_width=True)
+            else:
+                st.warning(f"No data available for {comparison_name} analysis")
+            
+            # Add separator between sections
+            if section_num < 3:
+                st.markdown("---")
     
     with market_seg_tab:
         st.subheader("📋 MHR Market Segmentation Documentation")

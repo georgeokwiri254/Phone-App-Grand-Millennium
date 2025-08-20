@@ -152,6 +152,10 @@ def process_entered_on_report(file_path, output_csv_path=None):
         df = pd.read_excel(file_path, sheet_name='ENTERED ON')
         logger.info(f"Loaded {len(df)} records from ENTERED ON sheet")
         
+        # Fill empty C_T_S_NAME values with "Brand.com" (don't rename column)
+        if 'C_T_S_NAME' in df.columns:
+            df['C_T_S_NAME'] = df['C_T_S_NAME'].fillna('Brand.com')
+        
         # Filter out rows where Room type is 'PM'
         initial_count = len(df)
         if 'ROOM' in df.columns:
@@ -181,8 +185,11 @@ def process_entered_on_report(file_path, output_csv_path=None):
         df['ARRIVAL_FORMATTED'] = df['ARRIVAL'].dt.strftime('%d/%m/%Y')
         df['DEPARTURE_FORMATTED'] = df['DEPARTURE'].dt.strftime('%d/%m/%Y')
         
-        # Use NET column for revenue calculations and apply 1.1x multiplier
-        df['AMOUNT'] = df['NET'] * 1.1
+        # Keep NET column as original - don't modify it
+        
+        # Apply 1.1x multiplier to original AMOUNT column if it exists
+        if 'AMOUNT' in df.columns:
+            df['AMOUNT'] = df['AMOUNT'] * 1.1
         
         # Apply 1.1x multiplier to original ADR column (Column O) if it exists  
         if 'ADR' in df.columns:
@@ -204,6 +211,7 @@ def process_entered_on_report(file_path, output_csv_path=None):
             departure = row['DEPARTURE']
             total_amount = row['AMOUNT'] if pd.notna(row['AMOUNT']) else 0
             total_nights = row['NIGHTS'] if pd.notna(row['NIGHTS']) else 0
+            adr_multiplied = row['ADR'] if pd.notna(row['ADR']) else 0  # ADR is already multiplied by 1.1
             
             # Get month splits for this booking
             month_splits = split_stay_across_months(arrival, departure, total_amount, total_nights)
@@ -217,15 +225,15 @@ def process_entered_on_report(file_path, output_csv_path=None):
                 new_row['SPLIT_YEAR'] = split['year'] 
                 new_row['SPLIT_MONTH_NUM'] = split['month_num']
                 new_row['NIGHTS_IN_MONTH'] = split['nights_in_month']
-                new_row['AMOUNT_IN_MONTH'] = split['amount_in_month']
+                
+                # Calculate amount for this month: ADR × nights_in_month (ADR already multiplied by 1.1)
+                new_row['AMOUNT_IN_MONTH'] = adr_multiplied * split['nights_in_month']
+                
                 new_row['PERIOD_START'] = split['period_start']
                 new_row['PERIOD_END'] = split['period_end']
                 
-                # Calculate ADR for this month split
-                if split['nights_in_month'] > 0:
-                    new_row['ADR_IN_MONTH'] = split['amount_in_month'] / split['nights_in_month']
-                else:
-                    new_row['ADR_IN_MONTH'] = 0
+                # ADR for this month is the same as the booking ADR (already multiplied by 1.1)
+                new_row['ADR_IN_MONTH'] = adr_multiplied
                 
                 expanded_rows.append(new_row)
         
@@ -239,7 +247,10 @@ def process_entered_on_report(file_path, output_csv_path=None):
             expanded_df['EVENTS_DATES'] = expanded_df.get('Events Dates ', '')
         
         # Clean company name for analysis
-        expanded_df['COMPANY_CLEAN'] = expanded_df['C_T_S_NAME'].fillna('Unknown')
+        if 'C_T_S_NAME' in expanded_df.columns:
+            expanded_df['COMPANY_CLEAN'] = expanded_df['C_T_S_NAME'].fillna('Brand.com')
+        else:
+            expanded_df['COMPANY_CLEAN'] = 'Brand.com'
         
         # Drop duplicate columns if they exist
         columns_to_drop = ['Season', 'Booking Lead Time ', 'Events Dates ']
