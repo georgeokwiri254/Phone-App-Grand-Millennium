@@ -275,6 +275,33 @@ class RevenueDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Create monthly_forecast_data table for time series forecasting
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS monthly_forecast_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Year INTEGER,
+                    Month INTEGER,
+                    Month_Name TEXT,
+                    Year_Month TEXT,
+                    Days_in_Month INTEGER,
+                    Month_Start_Date DATE,
+                    Month_End_Date DATE,
+                    Total_Revenue REAL,
+                    Avg_Daily_Revenue REAL,
+                    Total_Rooms_Sold REAL,
+                    Avg_Daily_Rooms_Sold REAL,
+                    Avg_ADR REAL,
+                    Median_ADR REAL,
+                    Avg_RevPar REAL,
+                    Median_RevPar REAL,
+                    Avg_Occupancy_Pct REAL,
+                    Median_Occupancy_Pct REAL,
+                    Calculated_Avg_Occupancy_Pct REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
             # Create indexes for performance
             self._create_indexes(cursor)
@@ -306,7 +333,9 @@ class RevenueDatabase:
             "CREATE INDEX IF NOT EXISTS idx_entered_on_split_month ON entered_on(SPLIT_MONTH)",
             "CREATE INDEX IF NOT EXISTS idx_entered_on_season ON entered_on(SEASON)",
             "CREATE INDEX IF NOT EXISTS idx_str_date ON str_analysis(Date)",
-            "CREATE INDEX IF NOT EXISTS idx_str_dow ON str_analysis(DOW)"
+            "CREATE INDEX IF NOT EXISTS idx_str_dow ON str_analysis(DOW)",
+            "CREATE INDEX IF NOT EXISTS idx_monthly_forecast_year_month ON monthly_forecast_data(Year, Month)",
+            "CREATE INDEX IF NOT EXISTS idx_monthly_forecast_year_month_text ON monthly_forecast_data(Year_Month)"
         ]
         
         for index_sql in indexes:
@@ -1335,6 +1364,65 @@ class RevenueDatabase:
         except Exception as e:
             logger.error(f"Failed to get STR summary stats: {e}")
             return {}
+
+    def ingest_monthly_forecast_data(self, df: pd.DataFrame) -> bool:
+        """
+        Ingest monthly aggregated forecast data into database
+        
+        Args:
+            df: DataFrame with monthly aggregated data
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Ingesting monthly forecast data: {len(df)} rows")
+            
+            # Clear existing data and insert new data
+            df.to_sql('monthly_forecast_data', self.connection, if_exists='replace', index=False)
+            self.connection.commit()
+            
+            logger.info(f"Successfully ingested {len(df)} monthly forecast records")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to ingest monthly forecast data: {e}")
+            return False
+
+    def get_monthly_forecast_data(self, start_year: int = None, end_year: int = None) -> pd.DataFrame:
+        """
+        Get monthly forecast data from database
+        
+        Args:
+            start_year: Optional start year filter
+            end_year: Optional end year filter
+            
+        Returns:
+            DataFrame with monthly forecast data
+        """
+        try:
+            query = "SELECT * FROM monthly_forecast_data"
+            params = []
+            
+            if start_year or end_year:
+                conditions = []
+                if start_year:
+                    conditions.append("Year >= ?")
+                    params.append(start_year)
+                if end_year:
+                    conditions.append("Year <= ?")
+                    params.append(end_year)
+                query += " WHERE " + " AND ".join(conditions)
+            
+            query += " ORDER BY Year, Month"
+            
+            df = pd.read_sql_query(query, self.connection, params=params)
+            logger.info(f"Retrieved {len(df)} monthly forecast records")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to get monthly forecast data: {e}")
+            return pd.DataFrame()
 
     def close(self):
         """Close database connection"""
