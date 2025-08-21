@@ -408,6 +408,49 @@ def dashboard_tab():
                             st.session_state.selected_file_path = selected_file_path
                             st.success(f"✅ Found latest file: {latest_file[2]}")
                             st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                            
+                            # Auto-convert the selected file immediately
+                            conversion_status = st.empty()
+                            conversion_status.info("🔄 Auto-converting latest file...")
+                            
+                            try:
+                                # Import and run converters
+                                import sys
+                                sys.path.append('.')
+                                
+                                # Check if converters are available
+                                if converters_available:
+                                    # Run segment converter
+                                    segment_df, segment_csv = run_segment_conversion(selected_file_path)
+                                    
+                                    # Run occupancy converter
+                                    occupancy_df, occupancy_csv = run_occupancy_conversion(selected_file_path)
+                                    
+                                    conversion_status.success("✅ Auto-conversion completed successfully!")
+                                    
+                                    # Load to database if available
+                                    if database_available:
+                                        db_status = st.empty()
+                                        db_status.info("🔄 Loading data to SQL database...")
+                                        
+                                        db = get_database()
+                                        segment_success = db.ingest_segment_data(segment_df)
+                                        occupancy_success = db.ingest_occupancy_data(occupancy_df)
+                                        
+                                        if segment_success and occupancy_success:
+                                            db_status.success("✅ Data loaded to database successfully!")
+                                            st.session_state.data_loaded = True
+                                        else:
+                                            db_status.error("❌ Failed to load some data to database")
+                                    else:
+                                        st.warning("⚠️ Database not available - data processed but not stored")
+                                        st.session_state.data_loaded = True
+                                else:
+                                    conversion_status.error("❌ Converters not available")
+                                    
+                            except Exception as e:
+                                conversion_status.error(f"❌ Auto-conversion failed: {str(e)}")
+                                conversion_logger.error(f"Dashboard auto-conversion error: {e}")
                         else:
                             st.error(f"❌ No files matching pattern '{pattern}' found in {file_path}")
                     except Exception as e:
@@ -3379,6 +3422,66 @@ def block_analysis_tab():
     with block_subtabs[0]:  # Block EDA
         st.subheader("📈 Block EDA")
         
+        # Auto-select latest file on tab load
+        if 'auto_selected_block_eda' not in st.session_state:
+            st.session_state.auto_selected_block_eda = False
+            
+        if not st.session_state.auto_selected_block_eda:
+            import os
+            from datetime import datetime
+            default_path = r"P:\Revenue\Weekly Revenue Meeting\Revenue Room Reports\Revenue Room\Group Forecast"
+            if os.path.exists(default_path):
+                try:
+                    # Search for files matching the pattern "Block Data"
+                    pattern = "Block Data"
+                    matching_files = []
+                    
+                    for file in os.listdir(default_path):
+                        if pattern.lower() in file.lower() and file.lower().endswith('.txt'):
+                            full_path = os.path.join(default_path, file)
+                            mod_time = os.path.getmtime(full_path)
+                            matching_files.append((full_path, mod_time, file))
+                    
+                    if matching_files:
+                        # Sort by modification time (newest first)
+                        matching_files.sort(key=lambda x: x[1], reverse=True)
+                        latest_file = matching_files[0]
+                        selected_file_path = latest_file[0]
+                        
+                        st.success(f"🎯 Auto-selected latest block data file: {latest_file[2]}")
+                        st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                        
+                        # Auto-convert the selected file immediately
+                        with st.spinner("🔄 Auto-processing latest Block Data file..."):
+                            try:
+                                # Create a file-like object from the selected file path
+                                class FileWrapper:
+                                    def __init__(self, file_path):
+                                        self.file_path = file_path
+                                        self.name = os.path.basename(file_path)
+                                        with open(file_path, 'rb') as f:
+                                            self._content = f.read()
+                                    
+                                    def getbuffer(self):
+                                        return self._content
+                                
+                                file_wrapper = FileWrapper(selected_file_path)
+                                
+                                # Process using existing function
+                                process_block_data_file(file_wrapper)
+                                st.success("✅ Auto-conversion completed successfully!")
+                                
+                                # Mark as auto-selected to prevent repeated processing
+                                st.session_state.auto_selected_block_eda = True
+                                
+                            except Exception as e:
+                                st.error(f"❌ Auto-conversion failed: {str(e)}")
+                                conversion_logger.error(f"Block Data auto-conversion error: {e}")
+                    else:
+                        st.warning(f"⚠️ No files matching pattern '{pattern}' found in {default_path}")
+                except Exception as e:
+                    st.error(f"❌ Error accessing path: {str(e)}")
+        
         # File upload section
         st.subheader("📁 Load Block Data")
         
@@ -3388,6 +3491,79 @@ def block_analysis_tab():
             help="Upload a block data TXT file for analysis",
             key="block_eda_upload"
         )
+        
+        # Auto file select section
+        st.markdown("---")
+        st.markdown("**Or auto-select latest file from folder:**")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            default_path = r"P:\Revenue\Weekly Revenue Meeting\Revenue Room Reports\Revenue Room\Group Forecast"
+            file_path = st.text_input(
+                "Folder Path", 
+                value=default_path,
+                help="Enter the path to the folder containing Block Data files",
+                key="block_data_path"
+            )
+        
+        with col2:
+            st.write("")  # Empty space for alignment
+            st.write("")  # Empty space for alignment
+            if st.button("🔍 Load Latest Block Data File", type="primary"):
+                import os
+                from datetime import datetime
+                if os.path.exists(file_path):
+                    try:
+                        # Search for files matching the pattern "Block Data"
+                        pattern = "Block Data"
+                        matching_files = []
+                        
+                        for file in os.listdir(file_path):
+                            if pattern.lower() in file.lower() and file.lower().endswith('.txt'):
+                                full_path = os.path.join(file_path, file)
+                                mod_time = os.path.getmtime(full_path)
+                                matching_files.append((full_path, mod_time, file))
+                        
+                        if matching_files:
+                            # Sort by modification time (newest first)
+                            matching_files.sort(key=lambda x: x[1], reverse=True)
+                            latest_file = matching_files[0]
+                            selected_file_path = latest_file[0]
+                            st.session_state.selected_block_file_path = selected_file_path
+                            st.success(f"✅ Found latest file: {latest_file[2]}")
+                            st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                            
+                            # Auto-convert the selected file immediately
+                            conversion_status = st.empty()
+                            conversion_status.info("🔄 Auto-converting latest file...")
+                            
+                            try:
+                                # Create a file-like object from the selected file path
+                                class FileWrapper:
+                                    def __init__(self, file_path):
+                                        self.file_path = file_path
+                                        self.name = os.path.basename(file_path)
+                                        with open(file_path, 'rb') as f:
+                                            self._content = f.read()
+                                    
+                                    def getbuffer(self):
+                                        return self._content
+                                
+                                file_wrapper = FileWrapper(selected_file_path)
+                                
+                                # Process using existing function
+                                process_block_data_file(file_wrapper)
+                                conversion_status.success("✅ Auto-conversion completed successfully!")
+                                
+                            except Exception as e:
+                                conversion_status.error(f"❌ Auto-conversion failed: {str(e)}")
+                                conversion_logger.error(f"Block Data auto-conversion error: {e}")
+                        else:
+                            st.error(f"❌ No files matching pattern '{pattern}' found in {file_path}")
+                    except Exception as e:
+                        st.error(f"❌ Error accessing path: {str(e)}")
+                else:
+                    st.error("❌ Path does not exist")
         
         if uploaded_file is not None:
             if st.button("Process Block Data", type="primary"):
@@ -4747,6 +4923,73 @@ def entered_on_arrivals_tab():
     with entered_tab:
         st.subheader("📝 Entered On Comprehensive Analysis")
         
+        # Auto-select latest file on tab load
+        if 'auto_selected_entered_on' not in st.session_state:
+            st.session_state.auto_selected_entered_on = False
+            
+        if not st.session_state.auto_selected_entered_on:
+            import os
+            from datetime import datetime
+            default_path = r"P:\Reservation\Entered on\8 Aug"
+            if os.path.exists(default_path):
+                try:
+                    # Search for files matching the pattern "Entered On"
+                    pattern = "Entered On"
+                    matching_files = []
+                    
+                    for file in os.listdir(default_path):
+                        if pattern.lower() in file.lower() and file.lower().endswith('.xlsm'):
+                            full_path = os.path.join(default_path, file)
+                            mod_time = os.path.getmtime(full_path)
+                            matching_files.append((full_path, mod_time, file))
+                    
+                    if matching_files:
+                        # Sort by modification time (newest first)
+                        matching_files.sort(key=lambda x: x[1], reverse=True)
+                        latest_file = matching_files[0]
+                        selected_file_path = latest_file[0]
+                        
+                        st.success(f"🎯 Auto-selected latest file: {latest_file[2]}")
+                        st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                        
+                        # Auto-convert the selected file immediately
+                        with st.spinner("🔄 Auto-processing latest Entered On file..."):
+                            try:
+                                # Import converter
+                                import sys
+                                sys.path.append('.')
+                                from converters.entered_on_converter import process_entered_on_report, get_summary_stats
+                                
+                                # Process the file
+                                df, csv_path = process_entered_on_report(selected_file_path)
+                                st.success("✅ Auto-conversion completed successfully!")
+                                
+                                # Load to database
+                                if database_available:
+                                    db = get_database()
+                                    success = db.ingest_entered_on_data(df)
+                                    
+                                    if success:
+                                        st.session_state.entered_on_data = df
+                                        st.success("✅ Data loaded to database successfully!")
+                                    else:
+                                        st.error("❌ Failed to load data to database")
+                                        st.session_state.entered_on_data = df
+                                else:
+                                    st.warning("⚠️ Database not available - data processed but not stored")
+                                    st.session_state.entered_on_data = df
+                                
+                                # Mark as auto-selected to prevent repeated processing
+                                st.session_state.auto_selected_entered_on = True
+                                
+                            except Exception as e:
+                                st.error(f"❌ Auto-conversion failed: {str(e)}")
+                                conversion_logger.error(f"Entered On auto-conversion error: {e}")
+                    else:
+                        st.warning(f"⚠️ No files matching pattern '{pattern}' found in {default_path}")
+                except Exception as e:
+                    st.error(f"❌ Error accessing path: {str(e)}")
+        
         # File upload section with auto-conversion
         st.markdown("### 📁 Upload Entered On Report")
         uploaded_file = st.file_uploader(
@@ -4754,6 +4997,89 @@ def entered_on_arrivals_tab():
             type=['xlsm'],
             help="Upload an Excel file with 'ENTERED ON' sheet - automatic conversion will begin immediately"
         )
+        
+        # Auto file select section
+        st.markdown("---")
+        st.markdown("**Or auto-select latest file from folder:**")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            default_path = r"P:\Reservation\Entered on\8 Aug"
+            file_path = st.text_input(
+                "Folder Path", 
+                value=default_path,
+                help="Enter the path to the folder containing Entered On files",
+                key="entered_on_path"
+            )
+        
+        with col2:
+            st.write("")  # Empty space for alignment
+            st.write("")  # Empty space for alignment
+            if st.button("🔍 Load Latest Entered On File", type="primary"):
+                import os
+                from datetime import datetime
+                if os.path.exists(file_path):
+                    try:
+                        # Search for files matching the pattern "Entered On"
+                        pattern = "Entered On"
+                        matching_files = []
+                        
+                        for file in os.listdir(file_path):
+                            if pattern.lower() in file.lower() and file.lower().endswith('.xlsm'):
+                                full_path = os.path.join(file_path, file)
+                                mod_time = os.path.getmtime(full_path)
+                                matching_files.append((full_path, mod_time, file))
+                        
+                        if matching_files:
+                            # Sort by modification time (newest first)
+                            matching_files.sort(key=lambda x: x[1], reverse=True)
+                            latest_file = matching_files[0]
+                            selected_file_path = latest_file[0]
+                            st.session_state.selected_entered_on_file_path = selected_file_path
+                            st.success(f"✅ Found latest file: {latest_file[2]}")
+                            st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                            
+                            # Auto-convert the selected file immediately
+                            conversion_status = st.empty()
+                            conversion_status.info("🔄 Auto-converting latest file...")
+                            
+                            try:
+                                # Import converter
+                                import sys
+                                sys.path.append('.')
+                                from converters.entered_on_converter import process_entered_on_report, get_summary_stats
+                                
+                                # Process the file
+                                df, csv_path = process_entered_on_report(selected_file_path)
+                                conversion_status.success("✅ Auto-conversion completed successfully!")
+                                
+                                # Load to database
+                                db_status = st.empty()
+                                db_status.info("🔄 Loading data to SQL database...")
+                                
+                                if database_available:
+                                    db = get_database()
+                                    success = db.ingest_entered_on_data(df)
+                                    
+                                    if success:
+                                        st.session_state.entered_on_data = df
+                                        db_status.success("✅ Data loaded to database successfully!")
+                                    else:
+                                        db_status.error("❌ Failed to load data to database")
+                                        st.session_state.entered_on_data = df
+                                else:
+                                    db_status.warning("⚠️ Database not available - data processed but not stored")
+                                    st.session_state.entered_on_data = df
+                                
+                            except Exception as e:
+                                conversion_status.error(f"❌ Auto-conversion failed: {str(e)}")
+                                conversion_logger.error(f"Entered On auto-conversion error: {e}")
+                        else:
+                            st.error(f"❌ No files matching pattern '{pattern}' found in {file_path}")
+                    except Exception as e:
+                        st.error(f"❌ Error accessing path: {str(e)}")
+                else:
+                    st.error("❌ Path does not exist")
         
         # Auto-convert when file is uploaded
         if uploaded_file is not None:
@@ -5811,6 +6137,75 @@ def entered_on_arrivals_tab():
         st.subheader("🚪 Arrivals Comprehensive Analysis")
         st.info("Upload and analyze Arrival Report Excel files with automatic conversion and comprehensive analytics.")
         
+        # Auto-select latest file on tab load
+        if 'auto_selected_arrivals' not in st.session_state:
+            st.session_state.auto_selected_arrivals = False
+            
+        if not st.session_state.auto_selected_arrivals:
+            import os
+            from datetime import datetime
+            default_path = r"P:\Reservation\Arrivals Report\2025\08. Aug"
+            if os.path.exists(default_path):
+                try:
+                    # Search for files matching the pattern "res_arrivals"
+                    pattern = "res_arrivals"
+                    matching_files = []
+                    
+                    for file in os.listdir(default_path):
+                        if pattern.lower() in file.lower() and file.lower().endswith('.xlsm'):
+                            full_path = os.path.join(default_path, file)
+                            mod_time = os.path.getmtime(full_path)
+                            matching_files.append((full_path, mod_time, file))
+                    
+                    if matching_files:
+                        # Sort by modification time (newest first)
+                        matching_files.sort(key=lambda x: x[1], reverse=True)
+                        latest_file = matching_files[0]
+                        selected_file_path = latest_file[0]
+                        
+                        st.success(f"🎯 Auto-selected latest arrivals file: {latest_file[2]}")
+                        st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                        
+                        # Auto-convert the selected file immediately
+                        with st.spinner("🔄 Auto-processing latest Arrivals file..."):
+                            try:
+                                # Import converter
+                                import sys
+                                sys.path.append('.')
+                                from converters.arrival_converter import process_arrival_report, get_arrival_summary_stats
+                                
+                                # Process the file
+                                df, csv_path = process_arrival_report(selected_file_path)
+                                st.success("✅ Auto-conversion completed successfully!")
+                                
+                                # Clear any old cached data and store fresh data
+                                if 'arrivals_data' in st.session_state:
+                                    del st.session_state.arrivals_data
+                                st.session_state.arrivals_data = df
+                                
+                                # Load to database if available
+                                if database_available:
+                                    db = get_database()
+                                    success = db.ingest_arrivals_data(df)
+                                    
+                                    if success:
+                                        st.success("✅ Data loaded to database successfully!")
+                                    else:
+                                        st.error("❌ Failed to load data to database")
+                                else:
+                                    st.warning("⚠️ Database not available - data processed but not stored")
+                                
+                                # Mark as auto-selected to prevent repeated processing
+                                st.session_state.auto_selected_arrivals = True
+                                
+                            except Exception as e:
+                                st.error(f"❌ Auto-conversion failed: {str(e)}")
+                                conversion_logger.error(f"Arrivals auto-conversion error: {e}")
+                    else:
+                        st.warning(f"⚠️ No files matching pattern '{pattern}' found in {default_path}")
+                except Exception as e:
+                    st.error(f"❌ Error accessing path: {str(e)}")
+        
         # File upload section with auto-conversion
         st.markdown("### 📁 Upload Arrival Report")
         uploaded_file = st.file_uploader(
@@ -5819,6 +6214,90 @@ def entered_on_arrivals_tab():
             help="Upload an Excel file with 'ARRIVAL CHECK' sheet - automatic conversion will begin immediately",
             key="arrivals_uploader"
         )
+        
+        # Auto file select section
+        st.markdown("---")
+        st.markdown("**Or auto-select latest file from folder:**")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            default_path = r"P:\Reservation\Arrivals Report\2025\08. Aug"
+            file_path = st.text_input(
+                "Folder Path", 
+                value=default_path,
+                help="Enter the path to the folder containing Arrivals files",
+                key="arrivals_path"
+            )
+        
+        with col2:
+            st.write("")  # Empty space for alignment
+            st.write("")  # Empty space for alignment
+            if st.button("🔍 Load Latest Arrivals File", type="primary"):
+                import os
+                from datetime import datetime
+                if os.path.exists(file_path):
+                    try:
+                        # Search for files matching the pattern "res_arrivals"
+                        pattern = "res_arrivals"
+                        matching_files = []
+                        
+                        for file in os.listdir(file_path):
+                            if pattern.lower() in file.lower() and file.lower().endswith('.xlsm'):
+                                full_path = os.path.join(file_path, file)
+                                mod_time = os.path.getmtime(full_path)
+                                matching_files.append((full_path, mod_time, file))
+                        
+                        if matching_files:
+                            # Sort by modification time (newest first)
+                            matching_files.sort(key=lambda x: x[1], reverse=True)
+                            latest_file = matching_files[0]
+                            selected_file_path = latest_file[0]
+                            st.session_state.selected_arrivals_file_path = selected_file_path
+                            st.success(f"✅ Found latest file: {latest_file[2]}")
+                            st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                            
+                            # Auto-convert the selected file immediately
+                            conversion_status = st.empty()
+                            conversion_status.info("🔄 Auto-converting latest file...")
+                            
+                            try:
+                                # Import converter
+                                import sys
+                                sys.path.append('.')
+                                from converters.arrival_converter import process_arrival_report, get_arrival_summary_stats
+                                
+                                # Process the file
+                                df, csv_path = process_arrival_report(selected_file_path)
+                                conversion_status.success("✅ Auto-conversion completed successfully!")
+                                
+                                # Clear any old cached data and store fresh data
+                                if 'arrivals_data' in st.session_state:
+                                    del st.session_state.arrivals_data
+                                st.session_state.arrivals_data = df
+                                
+                                # Load to database if available
+                                if database_available:
+                                    db_status = st.empty()
+                                    db_status.info("🔄 Loading data to SQL database...")
+                                    db = get_database()
+                                    success = db.ingest_arrivals_data(df)
+                                    
+                                    if success:
+                                        db_status.success("✅ Data loaded to database successfully!")
+                                    else:
+                                        db_status.error("❌ Failed to load data to database")
+                                else:
+                                    st.warning("⚠️ Database not available - data processed but not stored")
+                                
+                            except Exception as e:
+                                conversion_status.error(f"❌ Auto-conversion failed: {str(e)}")
+                                conversion_logger.error(f"Arrivals auto-conversion error: {e}")
+                        else:
+                            st.error(f"❌ No files matching pattern '{pattern}' found in {file_path}")
+                    except Exception as e:
+                        st.error(f"❌ Error accessing path: {str(e)}")
+                else:
+                    st.error("❌ Path does not exist")
         
         # Auto-convert when file is uploaded
         if uploaded_file is not None:
