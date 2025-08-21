@@ -3598,6 +3598,9 @@ def create_calendar_heatmap(block_data):
 
 def block_analysis_tab():
     """Block Analysis tab with subtabs for EDA, Dashboard, and Last Year"""
+    import os
+    from datetime import datetime
+    
     st.header("📊 Block Analysis")
     
     # Create subtabs
@@ -3606,65 +3609,109 @@ def block_analysis_tab():
     with block_subtabs[0]:  # Block EDA
         st.subheader("📈 Block EDA")
         
-        # Auto-select latest file on tab load
-        if 'auto_selected_block_eda' not in st.session_state:
-            st.session_state.auto_selected_block_eda = False
-            
-        if not st.session_state.auto_selected_block_eda:
-            import os
-            from datetime import datetime
+        # Auto-select and Convert Button Section
+        st.subheader("🚀 Auto-Select & Convert Block Data")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            # Try Morning Meeting folder first, then fallback to Group Forecast
+            today = datetime.now()
+            today_folder = today.strftime("%d.%m.%y")  # e.g., "21.08.25"
+            morning_meeting_path = f"P:\\Morning-Meeting\\August 2025\\{today_folder}"
             default_path = r"P:\Revenue\Weekly Revenue Meeting\Revenue Room Reports\Revenue Room\Group Forecast"
-            if os.path.exists(default_path):
+            
+            # Check if Morning Meeting folder exists, otherwise use Group Forecast
+            if os.path.exists(morning_meeting_path):
+                auto_path = morning_meeting_path
+                path_description = f"Morning Meeting Folder ({today_folder})"
+            else:
+                auto_path = default_path
+                path_description = "Group Forecast Folder"
+            
+            auto_file_path = st.text_input(
+                f"Auto-Select Path ({path_description})", 
+                value=auto_path,
+                help=f"Path to search for Block Data files. Will look for latest file containing 'Block Data' or 'Block' in the name",
+                key="block_auto_path"
+            )
+        
+        with col2:
+            st.write("")  # Empty space for alignment
+            st.write("")  # Empty space for alignment
+            if st.button("🎯 Auto-Select & Convert Block Data", type="primary", key="auto_block_convert"):
+                import os
+                from datetime import datetime
+                
                 try:
-                    # Search for files matching the pattern "Block Data"
-                    pattern = "Block Data"
-                    matching_files = []
+                    st.info(f"🔍 Searching for Block Data files in: {auto_file_path}")
                     
-                    for file in os.listdir(default_path):
-                        if pattern.lower() in file.lower() and file.lower().endswith('.txt'):
-                            full_path = os.path.join(default_path, file)
-                            mod_time = os.path.getmtime(full_path)
-                            matching_files.append((full_path, mod_time, file))
-                    
-                    if matching_files:
-                        # Sort by modification time (newest first)
-                        matching_files.sort(key=lambda x: x[1], reverse=True)
-                        latest_file = matching_files[0]
-                        selected_file_path = latest_file[0]
+                    if os.path.exists(auto_file_path):
+                        # Search for files matching Block Data patterns
+                        block_patterns = ["Block Data", "Block", "block data", "block"]
+                        matching_files = []
                         
-                        st.success(f"🎯 Auto-selected latest block data file: {latest_file[2]}")
-                        st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                        for file in os.listdir(auto_file_path):
+                            if any(pattern in file for pattern in block_patterns) and file.lower().endswith('.txt'):
+                                full_path = os.path.join(auto_file_path, file)
+                                mod_time = os.path.getmtime(full_path)
+                                matching_files.append((full_path, mod_time, file))
                         
-                        # Auto-convert the selected file immediately
-                        with st.spinner("🔄 Auto-processing latest Block Data file..."):
-                            try:
-                                # Create a file-like object from the selected file path
-                                class FileWrapper:
-                                    def __init__(self, file_path):
-                                        self.file_path = file_path
-                                        self.name = os.path.basename(file_path)
-                                        with open(file_path, 'rb') as f:
-                                            self._content = f.read()
+                        if matching_files:
+                            # Sort by modification time (newest first)
+                            matching_files.sort(key=lambda x: x[1], reverse=True)
+                            latest_file = matching_files[0]
+                            selected_file_path = latest_file[0]
+                            
+                            st.success(f"🎯 Found {len(matching_files)} Block Data file(s). Auto-selected latest: {latest_file[2]}")
+                            st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                            st.info(f"📁 Path: {selected_file_path}")
+                            
+                            # Auto-convert the selected file immediately
+                            with st.spinner("🔄 Auto-processing Block Data file..."):
+                                try:
+                                    # Create a file-like object from the selected file path
+                                    class FileWrapper:
+                                        def __init__(self, file_path):
+                                            self.file_path = file_path
+                                            self.name = os.path.basename(file_path)
+                                            with open(file_path, 'rb') as f:
+                                                self._content = f.read()
+                                        
+                                        def getbuffer(self):
+                                            return self._content
                                     
-                                    def getbuffer(self):
-                                        return self._content
-                                
-                                file_wrapper = FileWrapper(selected_file_path)
-                                
-                                # Process using existing function
-                                process_block_data_file(file_wrapper)
-                                st.success("✅ Auto-conversion completed successfully!")
-                                
-                                # Mark as auto-selected to prevent repeated processing
-                                st.session_state.auto_selected_block_eda = True
-                                
-                            except Exception as e:
-                                st.error(f"❌ Auto-conversion failed: {str(e)}")
-                                conversion_logger.error(f"Block Data auto-conversion error: {e}")
+                                    file_wrapper = FileWrapper(selected_file_path)
+                                    
+                                    # Process using existing function
+                                    process_block_data_file(file_wrapper)
+                                    st.success("✅ Auto-select and conversion completed successfully!")
+                                    
+                                    # Force refresh to show updated data
+                                    st.rerun()
+                                    
+                                except Exception as e:
+                                    st.error(f"❌ Auto-conversion failed: {str(e)}")
+                                    if 'conversion_logger' in globals():
+                                        conversion_logger.error(f"Block Data auto-conversion error: {e}")
+                        else:
+                            st.warning(f"⚠️ No Block Data files found in: {auto_file_path}")
+                            st.info("💡 Looking for files containing 'Block Data' or 'Block' with .txt extensions")
+                            
+                            # Show available files as helpful info
+                            try:
+                                available_files = [f for f in os.listdir(auto_file_path) if f.lower().endswith('.txt')]
+                                if available_files:
+                                    available_files.sort()
+                                    st.info(f"📄 Available TXT files: {', '.join(available_files[:5])}{'...' if len(available_files) > 5 else ''}")
+                            except:
+                                pass
                     else:
-                        st.warning(f"⚠️ No files matching pattern '{pattern}' found in {default_path}")
+                        st.error(f"❌ Path does not exist: {auto_file_path}")
+                        st.info("💡 Please check the path and ensure you have network access to the folder.")
+                        
                 except Exception as e:
-                    st.error(f"❌ Error accessing path: {str(e)}")
+                    st.error(f"❌ Error during auto-select: {str(e)}")
+                    st.info("💡 Make sure you have network access and proper permissions to the specified folder.")
         
         # File upload section
         st.subheader("📁 Load Block Data")
@@ -3676,78 +3723,8 @@ def block_analysis_tab():
             key="block_eda_upload"
         )
         
-        # Auto file select section
+        # Manual upload section for alternative option
         st.markdown("---")
-        st.markdown("**Or auto-select latest file from folder:**")
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            default_path = r"P:\Revenue\Weekly Revenue Meeting\Revenue Room Reports\Revenue Room\Group Forecast"
-            file_path = st.text_input(
-                "Folder Path", 
-                value=default_path,
-                help="Enter the path to the folder containing Block Data files",
-                key="block_data_path"
-            )
-        
-        with col2:
-            st.write("")  # Empty space for alignment
-            st.write("")  # Empty space for alignment
-            if st.button("🔍 Load Latest Block Data File", type="primary"):
-                import os
-                from datetime import datetime
-                if os.path.exists(file_path):
-                    try:
-                        # Search for files matching the pattern "Block Data"
-                        pattern = "Block Data"
-                        matching_files = []
-                        
-                        for file in os.listdir(file_path):
-                            if pattern.lower() in file.lower() and file.lower().endswith('.txt'):
-                                full_path = os.path.join(file_path, file)
-                                mod_time = os.path.getmtime(full_path)
-                                matching_files.append((full_path, mod_time, file))
-                        
-                        if matching_files:
-                            # Sort by modification time (newest first)
-                            matching_files.sort(key=lambda x: x[1], reverse=True)
-                            latest_file = matching_files[0]
-                            selected_file_path = latest_file[0]
-                            st.session_state.selected_block_file_path = selected_file_path
-                            st.success(f"✅ Found latest file: {latest_file[2]}")
-                            st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
-                            
-                            # Auto-convert the selected file immediately
-                            conversion_status = st.empty()
-                            conversion_status.info("🔄 Auto-converting latest file...")
-                            
-                            try:
-                                # Create a file-like object from the selected file path
-                                class FileWrapper:
-                                    def __init__(self, file_path):
-                                        self.file_path = file_path
-                                        self.name = os.path.basename(file_path)
-                                        with open(file_path, 'rb') as f:
-                                            self._content = f.read()
-                                    
-                                    def getbuffer(self):
-                                        return self._content
-                                
-                                file_wrapper = FileWrapper(selected_file_path)
-                                
-                                # Process using existing function
-                                process_block_data_file(file_wrapper)
-                                conversion_status.success("✅ Auto-conversion completed successfully!")
-                                
-                            except Exception as e:
-                                conversion_status.error(f"❌ Auto-conversion failed: {str(e)}")
-                                conversion_logger.error(f"Block Data auto-conversion error: {e}")
-                        else:
-                            st.error(f"❌ No files matching pattern '{pattern}' found in {file_path}")
-                    except Exception as e:
-                        st.error(f"❌ Error accessing path: {str(e)}")
-                else:
-                    st.error("❌ Path does not exist")
         
         if uploaded_file is not None:
             if st.button("Process Block Data", type="primary"):
