@@ -2961,15 +2961,15 @@ def str_report_tab():
             from datetime import datetime
             
             try:
-                # Get today's date
+                # Get today's date in DD.MM.YY format
                 today = datetime.now()
-                today_day = str(today.day)  # e.g., "21"
+                today_folder = today.strftime("%d.%m.%y")  # e.g., "21.08.25"
                 
-                st.info(f"🗓️ Looking for folder '{today_day}' in {file_path}")
+                st.info(f"🗓️ Looking for folder '{today_folder}' in {file_path}")
                 
                 if os.path.exists(file_path):
-                    # Look for today's folder (e.g., "21")
-                    today_folder_path = os.path.join(file_path, today_day)
+                    # Look for today's folder (e.g., "21.08.25")
+                    today_folder_path = os.path.join(file_path, today_folder)
                     
                     if os.path.exists(today_folder_path):
                         st.success(f"✅ Found today's folder: {today_folder_path}")
@@ -3029,7 +3029,7 @@ def str_report_tab():
                             st.warning(f"⚠️ No STR files found in folder: {today_folder_path}")
                             st.info("💡 Looking for files containing 'STR' or 'str' with .xls/.xlsx extensions")
                     else:
-                        st.warning(f"⚠️ Today's folder '{today_day}' not found in {file_path}")
+                        st.warning(f"⚠️ Today's folder '{today_folder}' not found in {file_path}")
                         
                         # Show available folders as helpful info
                         try:
