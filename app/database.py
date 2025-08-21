@@ -239,6 +239,34 @@ class RevenueDatabase:
                 )
             """)
             
+            # Create STR (Smith Travel Research) analysis table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS str_analysis (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Date DATE,
+                    DOW TEXT,
+                    My_Prop_Occ REAL,
+                    Comp_Set_Occ REAL,
+                    My_Prop_Occ_Change REAL,
+                    Comp_Set_Occ_Change REAL,
+                    MPI REAL,
+                    Rank_Occ INTEGER,
+                    My_Prop_ADR REAL,
+                    Comp_Set_ADR REAL,
+                    My_Prop_ADR_Change REAL,
+                    Comp_Set_ADR_Change REAL,
+                    ARI REAL,
+                    Rank_ADR INTEGER,
+                    My_Prop_RevPar REAL,
+                    Comp_Set_RevPar REAL,
+                    My_Prop_RevPar_Change REAL,
+                    Comp_Set_RevPar_Change REAL,
+                    RGI REAL,
+                    Rank_RevPar INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Create metadata table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -276,7 +304,9 @@ class RevenueDatabase:
             "CREATE INDEX IF NOT EXISTS idx_entered_on_company ON entered_on(COMPANY_CLEAN)",
             "CREATE INDEX IF NOT EXISTS idx_entered_on_resv_id ON entered_on(RESV_ID)",
             "CREATE INDEX IF NOT EXISTS idx_entered_on_split_month ON entered_on(SPLIT_MONTH)",
-            "CREATE INDEX IF NOT EXISTS idx_entered_on_season ON entered_on(SEASON)"
+            "CREATE INDEX IF NOT EXISTS idx_entered_on_season ON entered_on(SEASON)",
+            "CREATE INDEX IF NOT EXISTS idx_str_date ON str_analysis(Date)",
+            "CREATE INDEX IF NOT EXISTS idx_str_dow ON str_analysis(DOW)"
         ]
         
         for index_sql in indexes:
@@ -1157,6 +1187,154 @@ class RevenueDatabase:
         except Exception as e:
             logger.error(f"Failed to get combined forecast data: {e}")
             return pd.DataFrame()
+
+    def ingest_str_data(self, df: pd.DataFrame) -> bool:
+        """
+        Ingest STR (Smith Travel Research) data into database
+        
+        Args:
+            df: DataFrame with STR data
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Ingesting STR data: {len(df)} rows")
+            
+            # Clean data for database insertion
+            df_clean = df.copy()
+            
+            # Convert Date column to string format for SQLite
+            if 'Date' in df_clean.columns:
+                df_clean['Date'] = pd.to_datetime(df_clean['Date']).dt.strftime('%Y-%m-%d')
+            
+            # Use pandas to_sql for efficient bulk insert
+            df_clean.to_sql('str_analysis', self.connection, if_exists='replace', index=False)
+            
+            # Update metadata
+            self._update_metadata('str_last_updated', datetime.now().isoformat())
+            self._update_metadata('str_rows', str(len(df)))
+            
+            self.connection.commit()
+            logger.info("STR data ingested successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to ingest STR data: {e}")
+            logger.error(f"DataFrame columns: {list(df.columns)}")
+            return False
+
+    def get_str_data(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DataFrame:
+        """
+        Retrieve STR analysis data
+        
+        Args:
+            start_date: Start date filter (YYYY-MM-DD)
+            end_date: End date filter (YYYY-MM-DD)
+            
+        Returns:
+            DataFrame with STR data
+        """
+        try:
+            query = "SELECT * FROM str_analysis"
+            params = []
+            conditions = []
+            
+            if start_date:
+                conditions.append("Date >= ?")
+                params.append(start_date)
+            
+            if end_date:
+                conditions.append("Date <= ?")
+                params.append(end_date)
+            
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            
+            query += " ORDER BY Date"
+            
+            df = pd.read_sql_query(query, self.connection, params=params)
+            
+            # Convert Date column back to datetime
+            if 'Date' in df.columns and not df.empty:
+                df['Date'] = pd.to_datetime(df['Date'])
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve STR data: {e}")
+            return pd.DataFrame()
+
+    def get_str_summary_stats(self) -> dict:
+        """
+        Get summary statistics for STR data
+        
+        Returns:
+            Dictionary with STR data statistics
+        """
+        try:
+            stats = {}
+            
+            # Total records and date range
+            query = "SELECT COUNT(*) as total_records, MIN(Date) as start_date, MAX(Date) as end_date FROM str_analysis"
+            result = self.connection.execute(query).fetchone()
+            stats['total_records'] = result[0] if result[0] else 0
+            stats['date_range'] = {
+                'start': result[1] if result[1] else None,
+                'end': result[2] if result[2] else None
+            }
+            
+            # Average indices
+            query = """SELECT 
+                        AVG(MPI) as avg_mpi,
+                        AVG(ARI) as avg_ari,
+                        AVG(RGI) as avg_rgi,
+                        AVG(My_Prop_Occ) as avg_my_occ,
+                        AVG(Comp_Set_Occ) as avg_comp_occ,
+                        AVG(My_Prop_ADR) as avg_my_adr,
+                        AVG(Comp_Set_ADR) as avg_comp_adr,
+                        AVG(My_Prop_RevPar) as avg_my_revpar,
+                        AVG(Comp_Set_RevPar) as avg_comp_revpar
+                       FROM str_analysis"""
+            result = self.connection.execute(query).fetchone()
+            
+            stats['averages'] = {
+                'MPI': result[0] if result[0] else 0,
+                'ARI': result[1] if result[1] else 0,
+                'RGI': result[2] if result[2] else 0,
+                'my_prop_occ': result[3] if result[3] else 0,
+                'comp_set_occ': result[4] if result[4] else 0,
+                'my_prop_adr': result[5] if result[5] else 0,
+                'comp_set_adr': result[6] if result[6] else 0,
+                'my_prop_revpar': result[7] if result[7] else 0,
+                'comp_set_revpar': result[8] if result[8] else 0
+            }
+            
+            # Performance vs competition
+            query = """SELECT 
+                        COUNT(CASE WHEN MPI > 100 THEN 1 END) as occ_outperform,
+                        COUNT(CASE WHEN ARI > 100 THEN 1 END) as adr_outperform,
+                        COUNT(CASE WHEN RGI > 100 THEN 1 END) as revpar_outperform,
+                        COUNT(*) as total_days
+                       FROM str_analysis"""
+            result = self.connection.execute(query).fetchone()
+            
+            if result[3] > 0:  # total_days > 0
+                stats['performance'] = {
+                    'occ_outperform_pct': (result[0] / result[3]) * 100,
+                    'adr_outperform_pct': (result[1] / result[3]) * 100,
+                    'revpar_outperform_pct': (result[2] / result[3]) * 100,
+                    'occ_outperform_days': result[0],
+                    'adr_outperform_days': result[1],
+                    'revpar_outperform_days': result[2],
+                    'total_days': result[3]
+                }
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Failed to get STR summary stats: {e}")
+            return {}
 
     def close(self):
         """Close database connection"""

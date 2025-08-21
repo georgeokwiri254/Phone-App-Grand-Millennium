@@ -351,10 +351,25 @@ Based on the Group Forecast Excel structure, the calendar heatmap provides:
 
 ### Use Cases
 
-- **Capacity Planning**: Visualize booking density across time
-- **Company Analysis**: Identify top block booking companies
-- **Pattern Recognition**: Spot seasonal or event-driven booking patterns
-- **Resource Allocation**: Plan staffing and services based on booking patterns
+**Capacity Planning**: Visualize booking density across time
+
+**Company Analysis**: Identify top block booking companies
+
+**Pattern Recognition**: Spot seasonal or event-driven booking patterns
+
+**Resource Allocation**: Plan staffing and services based on booking patterns
+
+
+# STR 
+
+
+1.Delete first 7 rows
+
+2.Delete column A,D,K,R
+3.Delete any text below the table formart
+4. Rename the 20 columns as Date	DOW	My Prop Occ	Comp Set Occ	My Prop Occ Change	Comp Set Occ change	MPI	Rank Occ	My Prop ADR 	Comp Set ADR	My Prop ADR change	Comp Set ADR change	ARI	Rank ADR	My Prop RevPar	Comp Set RevPar	My Prop Change	Comp Set Change	RGI	Rank Revpar
+5. save file as STR CSV and load to Database
+6.Do EDA analysis of Occ MPI (C-H) , ADR (I-N)and ARI, Revpar AND RGI(O-T).
 
 ## 🤝 Contributing
 
