@@ -2939,6 +2939,114 @@ def str_report_tab():
         help="Upload your STR Excel file for analysis"
     )
     
+    # Auto file select section
+    st.markdown("---")
+    st.markdown("**Or auto-select latest STR file from Morning Meeting folder:**")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        default_path = r"P:\Morning-Meeting\August 2025"
+        file_path = st.text_input(
+            "Morning Meeting Folder Path", 
+            value=default_path,
+            help="Enter the path to the Morning Meeting folder (e.g., P:\\Morning-Meeting\\August 2025)",
+            key="str_morning_meeting_path"
+        )
+    
+    with col2:
+        st.write("")  # Empty space for alignment
+        st.write("")  # Empty space for alignment
+        if st.button("🔍 Auto-Select Latest STR File", type="primary"):
+            import os
+            from datetime import datetime
+            
+            try:
+                # Get today's date
+                today = datetime.now()
+                today_day = str(today.day)  # e.g., "21"
+                
+                st.info(f"🗓️ Looking for folder '{today_day}' in {file_path}")
+                
+                if os.path.exists(file_path):
+                    # Look for today's folder (e.g., "21")
+                    today_folder_path = os.path.join(file_path, today_day)
+                    
+                    if os.path.exists(today_folder_path):
+                        st.success(f"✅ Found today's folder: {today_folder_path}")
+                        
+                        # Search for STR files in today's folder
+                        str_files = []
+                        pattern_keywords = ["str", "STR"]  # Look for files containing STR
+                        
+                        for file in os.listdir(today_folder_path):
+                            if any(keyword in file for keyword in pattern_keywords) and file.lower().endswith(('.xls', '.xlsx')):
+                                full_path = os.path.join(today_folder_path, file)
+                                mod_time = os.path.getmtime(full_path)
+                                str_files.append((full_path, mod_time, file))
+                        
+                        if str_files:
+                            # Sort by modification time (newest first)
+                            str_files.sort(key=lambda x: x[1], reverse=True)
+                            latest_str_file = str_files[0]
+                            selected_file_path = latest_str_file[0]
+                            
+                            st.success(f"🎯 Found {len(str_files)} STR file(s). Auto-selected latest: {latest_str_file[2]}")
+                            st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_str_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                            
+                            # Auto-process the selected file immediately
+                            with st.spinner("🔄 Auto-processing latest STR file..."):
+                                try:
+                                    # Import and use the STR converter
+                                    import sys
+                                    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'converters'))
+                                    
+                                    from str_converter import process_str_file, validate_str_data, get_str_summary_stats
+                                    
+                                    # Process the STR file directly from path
+                                    str_df, csv_path = process_str_file(selected_file_path)
+                                    
+                                    # Validate the data
+                                    if validate_str_data(str_df):
+                                        st.success("✅ STR data auto-processed and validated successfully!")
+                                        
+                                        # Store in session state
+                                        st.session_state.str_data = str_df
+                                        st.session_state.str_data_loaded = True
+                                        
+                                        # Show file details
+                                        st.info(f"📊 Loaded {len(str_df)} records from {selected_file_path}")
+                                        
+                                        # Force a rerun to show the analysis
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ STR data validation failed")
+                                        
+                                except ImportError:
+                                    st.error("❌ STR converter not available. Please ensure str_converter.py is in the converters folder.")
+                                except Exception as e:
+                                    st.error(f"❌ Error auto-processing STR file: {str(e)}")
+                        else:
+                            st.warning(f"⚠️ No STR files found in folder: {today_folder_path}")
+                            st.info("💡 Looking for files containing 'STR' or 'str' with .xls/.xlsx extensions")
+                    else:
+                        st.warning(f"⚠️ Today's folder '{today_day}' not found in {file_path}")
+                        
+                        # Show available folders as helpful info
+                        try:
+                            available_folders = [f for f in os.listdir(file_path) if os.path.isdir(os.path.join(file_path, f))]
+                            if available_folders:
+                                available_folders.sort()
+                                st.info(f"📁 Available folders: {', '.join(available_folders[:10])}{'...' if len(available_folders) > 10 else ''}")
+                        except:
+                            pass
+                else:
+                    st.error(f"❌ Path does not exist: {file_path}")
+                    st.info("💡 Please check the Morning Meeting folder path and ensure you have access to it.")
+                    
+            except Exception as e:
+                st.error(f"❌ Error accessing Morning Meeting folder: {str(e)}")
+                st.info("💡 Make sure you have network access and proper permissions to the P: drive.")
+    
     if uploaded_file is not None:
         try:
             # Save uploaded file temporarily and process
