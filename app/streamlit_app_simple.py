@@ -3614,19 +3614,10 @@ def block_analysis_tab():
         
         col1, col2 = st.columns([3, 1])
         with col1:
-            # Try Morning Meeting folder first, then fallback to Group Forecast
-            today = datetime.now()
-            today_folder = today.strftime("%d.%m.%y")  # e.g., "21.08.25"
-            morning_meeting_path = f"P:\\Morning-Meeting\\August 2025\\{today_folder}"
+            # Use the correct Block Data directory
             default_path = r"P:\Revenue\Weekly Revenue Meeting\Revenue Room Reports\Revenue Room\Group Forecast"
-            
-            # Check if Morning Meeting folder exists, otherwise use Group Forecast
-            if os.path.exists(morning_meeting_path):
-                auto_path = morning_meeting_path
-                path_description = f"Morning Meeting Folder ({today_folder})"
-            else:
-                auto_path = default_path
-                path_description = "Group Forecast Folder"
+            auto_path = default_path
+            path_description = "Block Data Directory (Group Forecast)"
             
             auto_file_path = st.text_input(
                 f"Auto-Select Path ({path_description})", 
