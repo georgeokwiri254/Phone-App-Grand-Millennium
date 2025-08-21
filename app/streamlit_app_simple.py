@@ -3775,7 +3775,8 @@ def block_analysis_tab():
                 )
             
             with filter_col2:
-                companies = ['All'] + sorted(block_data['CompanyName'].unique().tolist())
+                unique_companies = block_data['CompanyName'].dropna().unique().tolist()
+                companies = ['All'] + sorted([str(company) for company in unique_companies if company is not None])
                 company_filter = st.selectbox("Company", companies, key="eda_company_filter")
             
             with filter_col3:
@@ -6112,18 +6113,22 @@ def entered_on_arrivals_tab():
             
             with col1:
                 # Company filter
-                companies = ['All'] + sorted(entered_on_data['COMPANY_CLEAN'].unique().tolist())
+                unique_companies = entered_on_data['COMPANY_CLEAN'].dropna().unique().tolist()
+                companies = ['All'] + sorted([str(company) for company in unique_companies if company is not None])
                 selected_company = st.selectbox("Filter by Company:", companies, key="res_company_filter")
             
             with col2:
                 # Season filter
-                seasons = ['All'] + sorted(entered_on_data['SEASON'].unique().tolist())
+                unique_seasons = entered_on_data['SEASON'].dropna().unique().tolist()
+                seasons = ['All'] + sorted([str(season) for season in unique_seasons if season is not None])
                 selected_season = st.selectbox("Filter by Season:", seasons, key="res_season_filter")
             
             with col3:
                 # Booking status filter (if available)
                 if 'SHORT_RESV_STATUS' in entered_on_data.columns:
-                    statuses = ['All'] + sorted(entered_on_data['SHORT_RESV_STATUS'].unique().tolist())
+                    # Handle None values by filtering them out before sorting
+                    unique_statuses = entered_on_data['SHORT_RESV_STATUS'].dropna().unique().tolist()
+                    statuses = ['All'] + sorted([str(status) for status in unique_statuses if status is not None])
                     selected_status = st.selectbox("Filter by Status:", statuses, key="res_status_filter")
                 else:
                     selected_status = 'All'
@@ -6765,7 +6770,8 @@ def entered_on_arrivals_tab():
             
             with col1:
                 # Company filter
-                companies = ['All'] + sorted(arrivals_data['COMPANY_NAME_CLEAN'].unique().tolist())
+                unique_companies = arrivals_data['COMPANY_NAME_CLEAN'].dropna().unique().tolist()
+                companies = ['All'] + sorted([str(company) for company in unique_companies if company is not None])
                 selected_company = st.selectbox("Filter by Company", companies)
             
             with col2:
