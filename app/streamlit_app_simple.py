@@ -370,7 +370,7 @@ def dashboard_tab():
         
         # Auto file select section
         st.markdown("---")
-        st.markdown("**Or auto-select latest file from folder:**")
+        st.markdown("**Or auto-select, process, and ingest latest file from folder:**")
         
         col1, col2 = st.columns([3, 1])
         with col1:
@@ -385,7 +385,7 @@ def dashboard_tab():
         with col2:
             st.write("")  # Empty space for alignment
             st.write("")  # Empty space for alignment
-            if st.button("🔍 Load Latest File", type="primary"):
+            if st.button("🎯 Auto-Select, Process & Ingest", type="primary"):
                 if os.path.exists(file_path):
                     try:
                         # Search for files matching the pattern
@@ -408,6 +408,9 @@ def dashboard_tab():
                             st.session_state.selected_file_path = selected_file_path
                             st.success(f"✅ Found latest file: {latest_file[2]}")
                             st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                            
+                            # Mark that auto-processing is happening
+                            st.session_state.auto_processing_complete = False
                             
                             # Auto-convert the selected file immediately
                             conversion_status = st.empty()
@@ -440,11 +443,13 @@ def dashboard_tab():
                                         if segment_success and occupancy_success:
                                             db_status.success("✅ Data loaded to database successfully!")
                                             st.session_state.data_loaded = True
+                                            st.session_state.auto_processing_complete = True
                                         else:
                                             db_status.error("❌ Failed to load some data to database")
                                     else:
                                         st.warning("⚠️ Database not available - data processed but not stored")
                                         st.session_state.data_loaded = True
+                                        st.session_state.auto_processing_complete = True
                                 else:
                                     conversion_status.error("❌ Converters not available")
                                     
@@ -494,8 +499,8 @@ def dashboard_tab():
         else:
             st.error("❌ Processing failed")
     
-    # Handle selected file path
-    elif selected_file_path is not None:
+    # Handle selected file path (only show button if auto-processing hasn't been completed)
+    elif selected_file_path is not None and not st.session_state.get('auto_processing_complete', False):
         file_to_process = Path(selected_file_path)
         
         # Add process button for path-selected files
@@ -2939,114 +2944,6 @@ def str_report_tab():
         help="Upload your STR Excel file for analysis"
     )
     
-    # Auto file select section
-    st.markdown("---")
-    st.markdown("**Or auto-select latest STR file from Morning Meeting folder:**")
-    
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        default_path = r"P:\Morning-Meeting\August 2025"
-        file_path = st.text_input(
-            "Morning Meeting Folder Path", 
-            value=default_path,
-            help="Enter the path to the Morning Meeting folder (e.g., P:\\Morning-Meeting\\August 2025)",
-            key="str_morning_meeting_path"
-        )
-    
-    with col2:
-        st.write("")  # Empty space for alignment
-        st.write("")  # Empty space for alignment
-        if st.button("🔍 Auto-Select Latest STR File", type="primary"):
-            import os
-            from datetime import datetime
-            
-            try:
-                # Get today's date in DD.MM.YY format
-                today = datetime.now()
-                today_folder = today.strftime("%d.%m.%y")  # e.g., "21.08.25"
-                
-                st.info(f"🗓️ Looking for folder '{today_folder}' in {file_path}")
-                
-                if os.path.exists(file_path):
-                    # Look for today's folder (e.g., "21.08.25")
-                    today_folder_path = os.path.join(file_path, today_folder)
-                    
-                    if os.path.exists(today_folder_path):
-                        st.success(f"✅ Found today's folder: {today_folder_path}")
-                        
-                        # Search for STR files in today's folder
-                        str_files = []
-                        pattern_keywords = ["str", "STR"]  # Look for files containing STR
-                        
-                        for file in os.listdir(today_folder_path):
-                            if any(keyword in file for keyword in pattern_keywords) and file.lower().endswith(('.xls', '.xlsx')):
-                                full_path = os.path.join(today_folder_path, file)
-                                mod_time = os.path.getmtime(full_path)
-                                str_files.append((full_path, mod_time, file))
-                        
-                        if str_files:
-                            # Sort by modification time (newest first)
-                            str_files.sort(key=lambda x: x[1], reverse=True)
-                            latest_str_file = str_files[0]
-                            selected_file_path = latest_str_file[0]
-                            
-                            st.success(f"🎯 Found {len(str_files)} STR file(s). Auto-selected latest: {latest_str_file[2]}")
-                            st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_str_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
-                            
-                            # Auto-process the selected file immediately
-                            with st.spinner("🔄 Auto-processing latest STR file..."):
-                                try:
-                                    # Import and use the STR converter
-                                    import sys
-                                    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'converters'))
-                                    
-                                    from str_converter import process_str_file, validate_str_data, get_str_summary_stats
-                                    
-                                    # Process the STR file directly from path
-                                    str_df, csv_path = process_str_file(selected_file_path)
-                                    
-                                    # Validate the data
-                                    if validate_str_data(str_df):
-                                        st.success("✅ STR data auto-processed and validated successfully!")
-                                        
-                                        # Store in session state
-                                        st.session_state.str_data = str_df
-                                        st.session_state.str_data_loaded = True
-                                        
-                                        # Show file details
-                                        st.info(f"📊 Loaded {len(str_df)} records from {selected_file_path}")
-                                        
-                                        # Force a rerun to show the analysis
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ STR data validation failed")
-                                        
-                                except ImportError:
-                                    st.error("❌ STR converter not available. Please ensure str_converter.py is in the converters folder.")
-                                except Exception as e:
-                                    st.error(f"❌ Error auto-processing STR file: {str(e)}")
-                        else:
-                            st.warning(f"⚠️ No STR files found in folder: {today_folder_path}")
-                            st.info("💡 Looking for files containing 'STR' or 'str' with .xls/.xlsx extensions")
-                    else:
-                        st.warning(f"⚠️ Today's folder '{today_folder}' not found in {file_path}")
-                        
-                        # Show available folders as helpful info
-                        try:
-                            available_folders = [f for f in os.listdir(file_path) if os.path.isdir(os.path.join(file_path, f))]
-                            if available_folders:
-                                available_folders.sort()
-                                st.info(f"📁 Available folders: {', '.join(available_folders[:10])}{'...' if len(available_folders) > 10 else ''}")
-                        except:
-                            pass
-                else:
-                    st.error(f"❌ Path does not exist: {file_path}")
-                    st.info("💡 Please check the Morning Meeting folder path and ensure you have access to it.")
-                    
-            except Exception as e:
-                st.error(f"❌ Error accessing Morning Meeting folder: {str(e)}")
-                st.info("💡 Make sure you have network access and proper permissions to the P: drive.")
-    
     if uploaded_file is not None:
         try:
             # Save uploaded file temporarily and process
@@ -3598,9 +3495,6 @@ def create_calendar_heatmap(block_data):
 
 def block_analysis_tab():
     """Block Analysis tab with subtabs for EDA, Dashboard, and Last Year"""
-    import os
-    from datetime import datetime
-    
     st.header("📊 Block Analysis")
     
     # Create subtabs
@@ -3609,100 +3503,65 @@ def block_analysis_tab():
     with block_subtabs[0]:  # Block EDA
         st.subheader("📈 Block EDA")
         
-        # Auto-select and Convert Button Section
-        st.subheader("🚀 Auto-Select & Convert Block Data")
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            # Use the correct Block Data directory
-            default_path = r"P:\Revenue\Weekly Revenue Meeting\Revenue Room Reports\Revenue Room\Group Forecast"
-            auto_path = default_path
-            path_description = "Block Data Directory (Group Forecast)"
+        # Auto-select latest file on tab load
+        if 'auto_selected_block_eda' not in st.session_state:
+            st.session_state.auto_selected_block_eda = False
             
-            auto_file_path = st.text_input(
-                f"Auto-Select Path ({path_description})", 
-                value=auto_path,
-                help=f"Path to search for Block Data files. Will look for latest file containing 'Block Data' or 'Block' in the name",
-                key="block_auto_path"
-            )
-        
-        with col2:
-            st.write("")  # Empty space for alignment
-            st.write("")  # Empty space for alignment
-            if st.button("🎯 Auto-Select & Convert Block Data", type="primary", key="auto_block_convert"):
-                import os
-                from datetime import datetime
-                
+        if not st.session_state.auto_selected_block_eda:
+            import os
+            from datetime import datetime
+            default_path = r"P:\Revenue\Weekly Revenue Meeting\Revenue Room Reports\Revenue Room\Group Forecast"
+            if os.path.exists(default_path):
                 try:
-                    st.info(f"🔍 Searching for Block Data files in: {auto_file_path}")
+                    # Search for files matching the pattern "Block Data"
+                    pattern = "Block Data"
+                    matching_files = []
                     
-                    if os.path.exists(auto_file_path):
-                        # Search for files matching Block Data patterns
-                        block_patterns = ["Block Data", "Block", "block data", "block"]
-                        matching_files = []
+                    for file in os.listdir(default_path):
+                        if pattern.lower() in file.lower() and file.lower().endswith('.txt'):
+                            full_path = os.path.join(default_path, file)
+                            mod_time = os.path.getmtime(full_path)
+                            matching_files.append((full_path, mod_time, file))
+                    
+                    if matching_files:
+                        # Sort by modification time (newest first)
+                        matching_files.sort(key=lambda x: x[1], reverse=True)
+                        latest_file = matching_files[0]
+                        selected_file_path = latest_file[0]
                         
-                        for file in os.listdir(auto_file_path):
-                            if any(pattern in file for pattern in block_patterns) and file.lower().endswith('.txt'):
-                                full_path = os.path.join(auto_file_path, file)
-                                mod_time = os.path.getmtime(full_path)
-                                matching_files.append((full_path, mod_time, file))
+                        st.success(f"🎯 Auto-selected latest block data file: {latest_file[2]}")
+                        st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
                         
-                        if matching_files:
-                            # Sort by modification time (newest first)
-                            matching_files.sort(key=lambda x: x[1], reverse=True)
-                            latest_file = matching_files[0]
-                            selected_file_path = latest_file[0]
-                            
-                            st.success(f"🎯 Found {len(matching_files)} Block Data file(s). Auto-selected latest: {latest_file[2]}")
-                            st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
-                            st.info(f"📁 Path: {selected_file_path}")
-                            
-                            # Auto-convert the selected file immediately
-                            with st.spinner("🔄 Auto-processing Block Data file..."):
-                                try:
-                                    # Create a file-like object from the selected file path
-                                    class FileWrapper:
-                                        def __init__(self, file_path):
-                                            self.file_path = file_path
-                                            self.name = os.path.basename(file_path)
-                                            with open(file_path, 'rb') as f:
-                                                self._content = f.read()
-                                        
-                                        def getbuffer(self):
-                                            return self._content
-                                    
-                                    file_wrapper = FileWrapper(selected_file_path)
-                                    
-                                    # Process using existing function
-                                    process_block_data_file(file_wrapper)
-                                    st.success("✅ Auto-select and conversion completed successfully!")
-                                    
-                                    # Force refresh to show updated data
-                                    st.rerun()
-                                    
-                                except Exception as e:
-                                    st.error(f"❌ Auto-conversion failed: {str(e)}")
-                                    if 'conversion_logger' in globals():
-                                        conversion_logger.error(f"Block Data auto-conversion error: {e}")
-                        else:
-                            st.warning(f"⚠️ No Block Data files found in: {auto_file_path}")
-                            st.info("💡 Looking for files containing 'Block Data' or 'Block' with .txt extensions")
-                            
-                            # Show available files as helpful info
+                        # Auto-convert the selected file immediately
+                        with st.spinner("🔄 Auto-processing latest Block Data file..."):
                             try:
-                                available_files = [f for f in os.listdir(auto_file_path) if f.lower().endswith('.txt')]
-                                if available_files:
-                                    available_files.sort()
-                                    st.info(f"📄 Available TXT files: {', '.join(available_files[:5])}{'...' if len(available_files) > 5 else ''}")
-                            except:
-                                pass
+                                # Create a file-like object from the selected file path
+                                class FileWrapper:
+                                    def __init__(self, file_path):
+                                        self.file_path = file_path
+                                        self.name = os.path.basename(file_path)
+                                        with open(file_path, 'rb') as f:
+                                            self._content = f.read()
+                                    
+                                    def getbuffer(self):
+                                        return self._content
+                                
+                                file_wrapper = FileWrapper(selected_file_path)
+                                
+                                # Process using existing function
+                                process_block_data_file(file_wrapper)
+                                st.success("✅ Auto-conversion completed successfully!")
+                                
+                                # Mark as auto-selected to prevent repeated processing
+                                st.session_state.auto_selected_block_eda = True
+                                
+                            except Exception as e:
+                                st.error(f"❌ Auto-conversion failed: {str(e)}")
+                                conversion_logger.error(f"Block Data auto-conversion error: {e}")
                     else:
-                        st.error(f"❌ Path does not exist: {auto_file_path}")
-                        st.info("💡 Please check the path and ensure you have network access to the folder.")
-                        
+                        st.warning(f"⚠️ No files matching pattern '{pattern}' found in {default_path}")
                 except Exception as e:
-                    st.error(f"❌ Error during auto-select: {str(e)}")
-                    st.info("💡 Make sure you have network access and proper permissions to the specified folder.")
+                    st.error(f"❌ Error accessing path: {str(e)}")
         
         # File upload section
         st.subheader("📁 Load Block Data")
@@ -3714,8 +3573,78 @@ def block_analysis_tab():
             key="block_eda_upload"
         )
         
-        # Manual upload section for alternative option
+        # Auto file select section
         st.markdown("---")
+        st.markdown("**Or auto-select latest file from folder:**")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            default_path = r"P:\Revenue\Weekly Revenue Meeting\Revenue Room Reports\Revenue Room\Group Forecast"
+            file_path = st.text_input(
+                "Folder Path", 
+                value=default_path,
+                help="Enter the path to the folder containing Block Data files",
+                key="block_data_path"
+            )
+        
+        with col2:
+            st.write("")  # Empty space for alignment
+            st.write("")  # Empty space for alignment
+            if st.button("🔍 Load Latest Block Data File", type="primary"):
+                import os
+                from datetime import datetime
+                if os.path.exists(file_path):
+                    try:
+                        # Search for files matching the pattern "Block Data"
+                        pattern = "Block Data"
+                        matching_files = []
+                        
+                        for file in os.listdir(file_path):
+                            if pattern.lower() in file.lower() and file.lower().endswith('.txt'):
+                                full_path = os.path.join(file_path, file)
+                                mod_time = os.path.getmtime(full_path)
+                                matching_files.append((full_path, mod_time, file))
+                        
+                        if matching_files:
+                            # Sort by modification time (newest first)
+                            matching_files.sort(key=lambda x: x[1], reverse=True)
+                            latest_file = matching_files[0]
+                            selected_file_path = latest_file[0]
+                            st.session_state.selected_block_file_path = selected_file_path
+                            st.success(f"✅ Found latest file: {latest_file[2]}")
+                            st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                            
+                            # Auto-convert the selected file immediately
+                            conversion_status = st.empty()
+                            conversion_status.info("🔄 Auto-converting latest file...")
+                            
+                            try:
+                                # Create a file-like object from the selected file path
+                                class FileWrapper:
+                                    def __init__(self, file_path):
+                                        self.file_path = file_path
+                                        self.name = os.path.basename(file_path)
+                                        with open(file_path, 'rb') as f:
+                                            self._content = f.read()
+                                    
+                                    def getbuffer(self):
+                                        return self._content
+                                
+                                file_wrapper = FileWrapper(selected_file_path)
+                                
+                                # Process using existing function
+                                process_block_data_file(file_wrapper)
+                                conversion_status.success("✅ Auto-conversion completed successfully!")
+                                
+                            except Exception as e:
+                                conversion_status.error(f"❌ Auto-conversion failed: {str(e)}")
+                                conversion_logger.error(f"Block Data auto-conversion error: {e}")
+                        else:
+                            st.error(f"❌ No files matching pattern '{pattern}' found in {file_path}")
+                    except Exception as e:
+                        st.error(f"❌ Error accessing path: {str(e)}")
+                else:
+                    st.error("❌ Path does not exist")
         
         if uploaded_file is not None:
             if st.button("Process Block Data", type="primary"):
@@ -3775,8 +3704,7 @@ def block_analysis_tab():
                 )
             
             with filter_col2:
-                unique_companies = block_data['CompanyName'].dropna().unique().tolist()
-                companies = ['All'] + sorted([str(company) for company in unique_companies if company is not None])
+                companies = ['All'] + sorted(block_data['CompanyName'].unique().tolist())
                 company_filter = st.selectbox("Company", companies, key="eda_company_filter")
             
             with filter_col3:
@@ -6113,22 +6041,18 @@ def entered_on_arrivals_tab():
             
             with col1:
                 # Company filter
-                unique_companies = entered_on_data['COMPANY_CLEAN'].dropna().unique().tolist()
-                companies = ['All'] + sorted([str(company) for company in unique_companies if company is not None])
+                companies = ['All'] + sorted(entered_on_data['COMPANY_CLEAN'].unique().tolist())
                 selected_company = st.selectbox("Filter by Company:", companies, key="res_company_filter")
             
             with col2:
                 # Season filter
-                unique_seasons = entered_on_data['SEASON'].dropna().unique().tolist()
-                seasons = ['All'] + sorted([str(season) for season in unique_seasons if season is not None])
+                seasons = ['All'] + sorted(entered_on_data['SEASON'].unique().tolist())
                 selected_season = st.selectbox("Filter by Season:", seasons, key="res_season_filter")
             
             with col3:
                 # Booking status filter (if available)
                 if 'SHORT_RESV_STATUS' in entered_on_data.columns:
-                    # Handle None values by filtering them out before sorting
-                    unique_statuses = entered_on_data['SHORT_RESV_STATUS'].dropna().unique().tolist()
-                    statuses = ['All'] + sorted([str(status) for status in unique_statuses if status is not None])
+                    statuses = ['All'] + sorted(entered_on_data['SHORT_RESV_STATUS'].unique().tolist())
                     selected_status = st.selectbox("Filter by Status:", statuses, key="res_status_filter")
                 else:
                     selected_status = 'All'
@@ -6770,8 +6694,7 @@ def entered_on_arrivals_tab():
             
             with col1:
                 # Company filter
-                unique_companies = arrivals_data['COMPANY_NAME_CLEAN'].dropna().unique().tolist()
-                companies = ['All'] + sorted([str(company) for company in unique_companies if company is not None])
+                companies = ['All'] + sorted(arrivals_data['COMPANY_NAME_CLEAN'].unique().tolist())
                 selected_company = st.selectbox("Filter by Company", companies)
             
             with col2:
@@ -6957,167 +6880,48 @@ def trend_analysis_subtab():
     display_monthly_adr_comparison(selected_month)
 
 def time_series_forecast_subtab():
-    """Time Series Forecast sub-tab - advanced forecasting with Prophet/ARIMA/SARIMAX"""
-    st.subheader("🔮 Advanced Time Series Forecasting")
+    """Time Series Forecast sub-tab - advanced forecasting"""
+    st.subheader("🔮 Time Series Forecasting")
     
-    # Check if monthly data is available
-    try:
-        db = get_database()
-        monthly_data = db.get_monthly_forecast_data()
+    # Display forecast preparation status
+    if prepare_forecast_data():
+        # Create tabs for different forecast views
+        forecast_view_tab1, forecast_view_tab2 = st.tabs(["📊 KPI Dashboard", "📋 12-Month Table"])
         
-        if monthly_data.empty:
-            st.error("❌ No monthly forecast data available. Please ensure monthly aggregated data has been loaded.")
-            st.info("💡 Run the data aggregation and ingestion process first.")
-            return
+        with forecast_view_tab1:
+            # Forecast horizon selection
+            st.write("**Recommended Forecast Horizons (Per Documentation):**")
+            col1, col2 = st.columns(2)
             
-        st.success(f"✅ Loaded {len(monthly_data)} monthly records ({monthly_data['Year'].min()}-{monthly_data['Year'].max()})")
-        
-        # Import forecasting module
-        try:
-            from app.advanced_time_series_forecasting import create_forecaster
-            forecaster_available = True
-        except ImportError:
-            st.error("❌ Advanced forecasting module not available")
-            forecaster_available = False
-            return
+            with col1:
+                st.info("📅 **90-Day Operational Forecast**\nDaily/weekly rolling forecast for operations\n• Rate decisions and yield management\n• Tactical staffing and resource planning")
+            with col2:
+                st.info("📅 **12-Month Strategic Forecast**\nMonthly refreshed scenario forecast\n• Annual budgeting and capital planning\n• Long-term strategic decisions")
             
-        # Create forecasting interface
-        st.write("**Available Forecasting Models:**")
-        col1, col2, col3 = st.columns(3)
+            st.divider()
+            
+            # Generate forecasts
+            if st.button("🚀 Generate Forecasts", use_container_width=True):
+                with st.spinner("Generating forecasts... This may take a few minutes."):
+                    generate_all_forecasts()
+            
+            # Display existing forecasts if available
+            display_forecast_results()
         
-        with col1:
-            st.info("🔮 **Prophet**\nFacebook's additive model\n• Automatic seasonality detection\n• Handles missing data well\n• Good for business time series")
-        with col2:
-            st.info("📈 **ARIMA**\nClassical time series model\n• Linear relationships\n• Stationary data focus\n• Simple and interpretable")
-        with col3:
-            st.info("🌊 **SARIMAX**\nSeasonal ARIMA with external factors\n• Captures seasonal patterns\n• Monthly/yearly cycles\n• Advanced seasonality handling")
-        
-        st.divider()
-        
-        # Target variable selection
-        target_options = {
-            'Total_Revenue': 'Total Monthly Revenue (AED)',
-            'Avg_ADR': 'Average Daily Rate (AED)', 
-            'Avg_RevPar': 'Revenue per Available Room (AED)',
-            'Avg_Occupancy_Pct': 'Average Occupancy Percentage (%)'
-        }
-        
-        selected_target = st.selectbox(
-            "Select Target Variable for Forecasting:",
-            options=list(target_options.keys()),
-            format_func=lambda x: target_options[x],
-            index=0
-        )
-        
-        # Forecast horizon selection
-        col1, col2 = st.columns(2)
-        with col1:
-            forecast_months_3 = st.number_input("3-Month Forecast Periods:", min_value=1, max_value=6, value=3)
-        with col2:
-            forecast_months_12 = st.number_input("12-Month Forecast Periods:", min_value=6, max_value=24, value=12)
-        
-        # Generate forecasts
-        if st.button("🚀 Generate Advanced Forecasts", use_container_width=True, type="primary"):
-            with st.spinner("Training Prophet, ARIMA, and SARIMAX models... This may take a few minutes."):
-                try:
-                    # Initialize forecaster
-                    forecaster = create_forecaster()
-                    
-                    # Load data
-                    if not forecaster.load_data(monthly_data):
-                        st.error("Failed to load data for forecasting")
-                        return
-                    
-                    # Fit all models for short-term forecast (3 months from Sep 2025)
-                    st.info("🔄 Training models for 3-month forecast...")
-                    results_3m = forecaster.fit_all_models(selected_target, forecast_months_3)
-                    
-                    if results_3m:
-                        st.success(f"✅ Short-term models trained: {', '.join(results_3m.keys())}")
-                        
-                        # Display 3-month forecast results  
-                        st.subheader("📅 3-Month Forecast (Sep, Oct, Nov 2025)")
-                        st.info("🎯 **Training Period**: 2022-2024 + Jan-Aug 2025 (Actual Data Only)")
-                        st.info("🔮 **Forecast Period**: Sep 2025 - Nov 2025 (Next 3 Months)")
-                        
-                        forecast_summary_3m = forecaster.get_forecast_summary(selected_target)
-                        if not forecast_summary_3m.empty:
-                            # Filter to first 3 months (Sep, Oct, Nov 2025)
-                            forecast_3m_display = forecast_summary_3m.head(forecast_months_3 * 3)  # 3 models * 3 months
-                            
-                            # Create forecast table
-                            forecast_table_3m = forecast_3m_display.pivot(
-                                index='date', 
-                                columns='model', 
-                                values=['forecast', 'lower_ci', 'upper_ci']
-                            )
-                            
-                            st.dataframe(
-                                forecast_table_3m.round(2),
-                                use_container_width=True
-                            )
-                            
-                            # Create visualization
-                            fig_3m = forecaster.create_forecast_visualization(selected_target)
-                            if fig_3m.data:
-                                # Limit x-axis to recent data + forecast
-                                recent_date = monthly_data['date'].max() - pd.DateOffset(months=12)
-                                fig_3m.update_xaxes(range=[recent_date, forecast_summary_3m['date'].max()])
-                                st.plotly_chart(fig_3m, use_container_width=True)
-                        
-                        # Store forecasts in session state for 12-month forecast
-                        st.session_state.forecaster = forecaster
-                        st.session_state.forecast_target = selected_target
-                    
-                    # Fit models for long-term forecast (12 months)
-                    st.info("🔄 Training models for 12-month forecast...")
-                    forecaster_12m = create_forecaster()
-                    forecaster_12m.load_data(monthly_data)
-                    results_12m = forecaster_12m.fit_all_models(selected_target, forecast_months_12)
-                    
-                    if results_12m:
-                        st.success(f"✅ Long-term models trained: {', '.join(results_12m.keys())}")
-                        
-                        # Display 12-month forecast results
-                        st.subheader("📊 12-Month Strategic Forecast (Sep 2025 - Aug 2026)")
-                        st.info("🎯 **Training Period**: 2022-2024 + Jan-Aug 2025 (Actual Data Only)")
-                        st.info("🔮 **Forecast Period**: Sep 2025 - Aug 2026 (Full Year Ahead)")
-                        
-                        forecast_summary_12m = forecaster_12m.get_forecast_summary(selected_target)
-                        if not forecast_summary_12m.empty:
-                            # Create forecast table
-                            forecast_table_12m = forecast_summary_12m.pivot(
-                                index='date', 
-                                columns='model', 
-                                values=['forecast', 'lower_ci', 'upper_ci']
-                            )
-                            
-                            st.dataframe(
-                                forecast_table_12m.round(2),
-                                use_container_width=True
-                            )
-                            
-                            # Create visualization
-                            fig_12m = forecaster_12m.create_forecast_visualization(selected_target)
-                            if fig_12m.data:
-                                st.plotly_chart(fig_12m, use_container_width=True)
-                        
-                        # Store long-term forecasts
-                        st.session_state.forecaster_12m = forecaster_12m
-                    
-                except Exception as e:
-                    st.error(f"Error during forecasting: {str(e)}")
-                    import traceback
-                    st.code(traceback.format_exc())
-        
-        # Display cached results if available
-        if 'forecaster' in st.session_state and 'forecast_target' in st.session_state:
-            if st.session_state.forecast_target == selected_target:
-                st.info("📋 Previous forecast results are available in session")
-        
-    except Exception as e:
-        st.error(f"Error loading monthly data: {str(e)}")
-        return
+        with forecast_view_tab2:
+            # Create sub-tabs for different table views
+            table_tab1, table_tab2 = st.tabs(["📅 3-Month Forecast", "📊 12-Month Forecast"])
+            
+            with table_tab1:
+                st.subheader("📋 Next 3 Months Detailed Forecast")
+                display_3_month_forecast_table()
+                
+            with table_tab2:
+                st.subheader("📋 12-Month Strategic Forecast")
+                display_12_month_forecast_table()
+            
+    else:
+        st.error("❌ Unable to prepare forecast data. Please ensure historical data is properly loaded.")
 
 def display_3_month_forecast_table():
     """Display detailed 3-month forecast in table format"""
