@@ -16,7 +16,13 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timedelta
 import io
-import pandas as pd
+
+# Advanced Time Series Forecasting
+try:
+    from app.advanced_time_series_forecasting import AdvancedTimeSeriesForecaster
+    ADVANCED_FORECASTING_AVAILABLE = True
+except ImportError:
+    ADVANCED_FORECASTING_AVAILABLE = False
 
 # Custom imports
 try:
@@ -6909,48 +6915,404 @@ def trend_analysis_subtab():
     display_monthly_adr_comparison(selected_month)
 
 def time_series_forecast_subtab():
-    """Time Series Forecast sub-tab - advanced forecasting"""
-    st.subheader("🔮 Time Series Forecasting")
+    """Advanced Time Series Forecast sub-tab with Prophet, ARIMA, and SARIMAX"""
+    st.subheader("🔮 Advanced Time Series Forecasting")
     
-    # Display forecast preparation status
-    if prepare_forecast_data():
-        # Create tabs for different forecast views
-        forecast_view_tab1, forecast_view_tab2 = st.tabs(["📊 KPI Dashboard", "📋 12-Month Table"])
+    if not ADVANCED_FORECASTING_AVAILABLE:
+        st.error("❌ Advanced forecasting not available. Please install required dependencies (Prophet, statsmodels)")
+        return
+    
+    # Load monthly forecast data
+    try:
+        # Try to load from processed data files
+        monthly_data_file = Path("data/processed/monthly_forecast_data_actuals_only.csv")
+        if monthly_data_file.exists():
+            df = pd.read_csv(monthly_data_file)
+            st.success(f"✅ Loaded {len(df)} months of historical data for forecasting")
+        else:
+            st.error("❌ Monthly forecast data not found. Please ensure data files are available.")
+            return
+            
+        # Initialize the advanced forecaster
+        forecaster = AdvancedTimeSeriesForecaster()
         
-        with forecast_view_tab1:
-            # Forecast horizon selection
-            st.write("**Recommended Forecast Horizons (Per Documentation):**")
-            col1, col2 = st.columns(2)
+        if forecaster.load_data(df):
+            st.success("✅ Data validated and prepared for forecasting")
             
-            with col1:
-                st.info("📅 **90-Day Operational Forecast**\nDaily/weekly rolling forecast for operations\n• Rate decisions and yield management\n• Tactical staffing and resource planning")
-            with col2:
-                st.info("📅 **12-Month Strategic Forecast**\nMonthly refreshed scenario forecast\n• Annual budgeting and capital planning\n• Long-term strategic decisions")
+            # Create forecast interface tabs
+            forecast_tabs = st.tabs(["🚀 Generate Forecasts", "📊 Model Results", "📈 Forecast Visualizations", "📋 Forecast Tables"])
             
-            st.divider()
-            
-            # Generate forecasts
-            if st.button("🚀 Generate Forecasts", use_container_width=True):
-                with st.spinner("Generating forecasts... This may take a few minutes."):
-                    generate_all_forecasts()
-            
-            # Display existing forecasts if available
-            display_forecast_results()
-        
-        with forecast_view_tab2:
-            # Create sub-tabs for different table views
-            table_tab1, table_tab2 = st.tabs(["📅 3-Month Forecast", "📊 12-Month Forecast"])
-            
-            with table_tab1:
-                st.subheader("📋 Next 3 Months Detailed Forecast")
-                display_3_month_forecast_table()
+            with forecast_tabs[0]:
+                st.subheader("🚀 Generate Advanced Forecasts")
                 
-            with table_tab2:
-                st.subheader("📋 12-Month Strategic Forecast")
-                display_12_month_forecast_table()
+                # Forecast parameters
+                col1, col2 = st.columns(2)
+                with col1:
+                    forecast_months = st.selectbox("Forecast Horizon", [3, 6, 12], index=0, help="Number of months to forecast")
+                with col2:
+                    confidence_level = st.slider("Confidence Level", 0.8, 0.95, 0.9, 0.05, help="Confidence interval for forecasts")
+                
+                # Model selection
+                st.write("**Select Forecasting Models:**")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    use_prophet = st.checkbox("Prophet (Seasonal)", value=True, help="Facebook Prophet with seasonality")
+                with col2:
+                    use_arima = st.checkbox("ARIMA", value=True, help="AutoRegressive Integrated Moving Average")
+                with col3:
+                    use_sarimax = st.checkbox("SARIMAX", value=True, help="Seasonal ARIMA with External Variables")
+                
+                # Generate forecasts button
+                if st.button("🎯 Generate Advanced Forecasts", type="primary", use_container_width=True):
+                    if not any([use_prophet, use_arima, use_sarimax]):
+                        st.error("❌ Please select at least one forecasting model")
+                    else:
+                        with st.spinner("🔄 Running advanced forecasting models... This may take a few minutes."):
+                            try:
+                                # Generate forecasts using selected models
+                                # Note: The target column in the data is 'Total_Revenue'
+                                results = forecaster.fit_all_models(
+                                    target='Total_Revenue', 
+                                    forecast_periods=forecast_months
+                                )
+                                
+                                if results and any(results.values()):
+                                    # Get the forecast summary and details
+                                    forecast_summary = forecaster.get_forecast_summary('Total_Revenue')
+                                    
+                                    # Store results in session state
+                                    st.session_state.advanced_forecasts = {
+                                        'fit_results': results,
+                                        'forecaster': forecaster,
+                                        'forecast_summary': forecast_summary
+                                    }
+                                    
+                                    # Show which models were successfully fitted
+                                    successful_models = [model for model, success in results.items() if success]
+                                    if successful_models:
+                                        st.success(f"✅ Advanced forecasts generated successfully! Models: {', '.join(successful_models)}")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ No models were successfully fitted")
+                                else:
+                                    st.error("❌ Failed to generate forecasts")
+                                    
+                            except Exception as e:
+                                st.error(f"❌ Forecasting error: {str(e)}")
+                                st.error("Please check if the data contains the required columns: Year, Month, Total_Revenue, Avg_ADR, Avg_RevPar, Avg_Occupancy_Pct")
             
-    else:
-        st.error("❌ Unable to prepare forecast data. Please ensure historical data is properly loaded.")
+            with forecast_tabs[1]:
+                st.subheader("📊 Model Performance & Results")
+                if 'advanced_forecasts' in st.session_state:
+                    display_advanced_forecast_results(st.session_state.advanced_forecasts, forecaster)
+                else:
+                    st.info("📋 No forecast results available. Please generate forecasts first.")
+            
+            with forecast_tabs[2]:
+                st.subheader("📈 Forecast Visualizations")
+                if 'advanced_forecasts' in st.session_state:
+                    display_advanced_forecast_charts(st.session_state.advanced_forecasts, forecaster)
+                else:
+                    st.info("📊 No forecast charts available. Please generate forecasts first.")
+            
+            with forecast_tabs[3]:
+                st.subheader("📋 Detailed Forecast Tables")
+                if 'advanced_forecasts' in st.session_state:
+                    display_advanced_forecast_tables(st.session_state.advanced_forecasts)
+                else:
+                    st.info("📋 No forecast tables available. Please generate forecasts first.")
+        else:
+            st.error("❌ Failed to load and validate data for forecasting")
+            
+    except Exception as e:
+        st.error(f"❌ Error initializing advanced forecasting: {str(e)}")
+        st.info("💡 Make sure monthly forecast data files are available in data/processed/")
+
+def display_advanced_forecast_results(results, forecaster):
+    """Display advanced forecasting model performance and results"""
+    try:
+        # Check if results is the new structure
+        if isinstance(results, dict) and 'fit_results' in results:
+            fit_results = results['fit_results']
+            actual_forecaster = results['forecaster']
+            forecast_summary = results.get('forecast_summary')
+        else:
+            fit_results = results
+            actual_forecaster = forecaster
+            forecast_summary = None
+        
+        # Model Fitting Status
+        st.write("#### 🎯 Model Fitting Status")
+        
+        status_data = []
+        for model_name, success in fit_results.items():
+            status_data.append({
+                'Model': model_name.title(),
+                'Status': '✅ Fitted Successfully' if success else '❌ Failed to Fit',
+                'Available': '✅' if success else '❌'
+            })
+        
+        if status_data:
+            status_df = pd.DataFrame(status_data)
+            st.dataframe(status_df, use_container_width=True)
+        
+        # Display forecast summary if available
+        if forecast_summary is not None and not forecast_summary.empty:
+            st.write("#### 📊 Forecast Summary")
+            st.dataframe(forecast_summary, use_container_width=True)
+        else:
+            st.info("📋 Forecast summary will be displayed after model fitting completes")
+        
+        # Model Performance Summary (if available)
+        if hasattr(actual_forecaster, 'model_performance') and actual_forecaster.model_performance:
+            st.write("#### 📈 Model Performance Metrics")
+            
+            perf_data = []
+            for model_name, metrics in actual_forecaster.model_performance.items():
+                if isinstance(metrics, dict):
+                    perf_data.append({
+                        'Model': model_name.title(),
+                        'MAE': f"{metrics.get('mae', 0):,.0f}",
+                        'RMSE': f"{metrics.get('rmse', 0):,.0f}",
+                        'MAPE': f"{metrics.get('mape', 0):.1%}",
+                        'R²': f"{metrics.get('r2', 0):.3f}"
+                    })
+            
+            if perf_data:
+                perf_df = pd.DataFrame(perf_data)
+                st.dataframe(perf_df, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying forecast results: {str(e)}")
+
+def display_advanced_forecast_charts(results, forecaster):
+    """Display advanced forecasting visualization charts"""
+    try:
+        # Check if results is the new structure
+        if isinstance(results, dict) and 'forecaster' in results:
+            actual_forecaster = results['forecaster']
+            
+            # Use the forecaster's built-in visualization method
+            if hasattr(actual_forecaster, 'create_forecast_visualization'):
+                try:
+                    fig = actual_forecaster.create_forecast_visualization('Total_Revenue')
+                    if fig:
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("📊 No forecast visualization available. Ensure models are fitted successfully.")
+                except Exception as e:
+                    st.error(f"Error creating forecast visualization: {str(e)}")
+            else:
+                st.info("📊 Forecast visualization method not available")
+            
+            return
+        
+        # Fallback to old structure handling
+        if 'TotalRevenue' in results:
+            revenue_forecasts = results['TotalRevenue']
+            
+            # Create forecast comparison chart
+            fig = go.Figure()
+            
+            # Get historical data for context
+            if hasattr(forecaster, 'data') and forecaster.data is not None:
+                historical_data = forecaster.data
+                if 'Date' in historical_data.columns and 'TotalRevenue' in historical_data.columns:
+                    # Add historical data
+                    fig.add_trace(go.Scatter(
+                        x=pd.to_datetime(historical_data['Date']),
+                        y=historical_data['TotalRevenue'],
+                        mode='lines+markers',
+                        name='Historical Revenue',
+                        line=dict(color='blue', width=2)
+                    ))
+            
+            # Add forecasts from each model
+            colors = {'prophet': 'green', 'arima': 'red', 'sarimax': 'orange'}
+            
+            for model_name, forecast_data in revenue_forecasts.items():
+                if 'forecast' in forecast_data and 'dates' in forecast_data:
+                    color = colors.get(model_name, 'gray')
+                    
+                    # Main forecast line
+                    fig.add_trace(go.Scatter(
+                        x=forecast_data['dates'],
+                        y=forecast_data['forecast'],
+                        mode='lines+markers',
+                        name=f'{model_name.title()} Forecast',
+                        line=dict(color=color, width=2, dash='dash')
+                    ))
+                    
+                    # Confidence intervals if available
+                    if 'lower_ci' in forecast_data and 'upper_ci' in forecast_data:
+                        # Upper confidence interval
+                        fig.add_trace(go.Scatter(
+                            x=forecast_data['dates'],
+                            y=forecast_data['upper_ci'],
+                            mode='lines',
+                            line=dict(width=0),
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
+                        
+                        # Lower confidence interval with fill
+                        fig.add_trace(go.Scatter(
+                            x=forecast_data['dates'],
+                            y=forecast_data['lower_ci'],
+                            mode='lines',
+                            line=dict(width=0),
+                            fill='tonexty',
+                            fillcolor=f'rgba({color}, 0.2)',
+                            name=f'{model_name.title()} CI',
+                            hoverinfo='skip'
+                        ))
+            
+            fig.update_layout(
+                title="🔮 Advanced Time Series Forecast Comparison",
+                xaxis_title="Date",
+                yaxis_title="Total Revenue (AED)",
+                hovermode='x unified',
+                height=600
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Individual model charts
+            st.write("#### 📈 Individual Model Forecasts")
+            
+            for model_name, forecast_data in revenue_forecasts.items():
+                if 'forecast' in forecast_data and 'dates' in forecast_data:
+                    with st.expander(f"📊 {model_name.title()} Model Details"):
+                        
+                        # Create individual model chart
+                        model_fig = go.Figure()
+                        
+                        # Historical data if available
+                        if hasattr(forecaster, 'data') and forecaster.data is not None:
+                            historical_data = forecaster.data
+                            if 'Date' in historical_data.columns and 'TotalRevenue' in historical_data.columns:
+                                model_fig.add_trace(go.Scatter(
+                                    x=pd.to_datetime(historical_data['Date']),
+                                    y=historical_data['TotalRevenue'],
+                                    mode='lines+markers',
+                                    name='Historical',
+                                    line=dict(color='blue', width=2)
+                                ))
+                        
+                        # Forecast
+                        color = colors.get(model_name, 'gray')
+                        model_fig.add_trace(go.Scatter(
+                            x=forecast_data['dates'],
+                            y=forecast_data['forecast'],
+                            mode='lines+markers',
+                            name=f'{model_name.title()} Forecast',
+                            line=dict(color=color, width=3)
+                        ))
+                        
+                        # Confidence intervals
+                        if 'lower_ci' in forecast_data and 'upper_ci' in forecast_data:
+                            model_fig.add_trace(go.Scatter(
+                                x=forecast_data['dates'],
+                                y=forecast_data['upper_ci'],
+                                mode='lines',
+                                line=dict(width=0),
+                                showlegend=False
+                            ))
+                            
+                            model_fig.add_trace(go.Scatter(
+                                x=forecast_data['dates'],
+                                y=forecast_data['lower_ci'],
+                                mode='lines',
+                                line=dict(width=0),
+                                fill='tonexty',
+                                fillcolor=f'rgba({color.replace("#", "")}, 0.3)',
+                                name='Confidence Interval'
+                            ))
+                        
+                        model_fig.update_layout(
+                            title=f"{model_name.title()} Revenue Forecast",
+                            xaxis_title="Date",
+                            yaxis_title="Total Revenue (AED)",
+                            hovermode='x unified',
+                            height=400
+                        )
+                        
+                        st.plotly_chart(model_fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying forecast charts: {str(e)}")
+
+def display_advanced_forecast_tables(results):
+    """Display detailed forecast tables"""
+    try:
+        # Check if results is the new structure
+        if isinstance(results, dict) and 'forecast_summary' in results:
+            forecast_summary = results['forecast_summary']
+            
+            if forecast_summary is not None and not forecast_summary.empty:
+                st.write("#### 📋 Detailed Forecast Values")
+                
+                # Display the forecast summary table
+                st.dataframe(forecast_summary, use_container_width=True)
+                
+                # Download button for forecast data
+                csv_data = forecast_summary.to_csv()
+                st.download_button(
+                    label="📥 Download Forecast Data (CSV)",
+                    data=csv_data,
+                    file_name=f"advanced_forecast_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("📋 No forecast data available for download. Please generate forecasts first.")
+            
+            return
+        
+        # Fallback to old structure handling
+        if 'TotalRevenue' in results:
+            revenue_forecasts = results['TotalRevenue']
+            
+            st.write("#### 📋 Detailed Forecast Values")
+            
+            # Combine all forecasts into a single table
+            forecast_table_data = {}
+            
+            for model_name, forecast_data in revenue_forecasts.items():
+                if 'forecast' in forecast_data and 'dates' in forecast_data:
+                    forecast_table_data[f'{model_name.title()} Forecast'] = forecast_data['forecast'].values
+                    if 'lower_ci' in forecast_data:
+                        forecast_table_data[f'{model_name.title()} Lower CI'] = forecast_data['lower_ci'].values
+                    if 'upper_ci' in forecast_data:
+                        forecast_table_data[f'{model_name.title()} Upper CI'] = forecast_data['upper_ci'].values
+                    
+                    # Use dates from first model
+                    if 'dates' not in forecast_table_data:
+                        forecast_table_data['Date'] = forecast_data['dates']
+            
+            if forecast_table_data and 'Date' in forecast_table_data:
+                # Create DataFrame
+                forecast_df = pd.DataFrame(forecast_table_data)
+                forecast_df['Date'] = pd.to_datetime(forecast_df['Date'])
+                forecast_df = forecast_df.set_index('Date')
+                
+                # Format monetary values
+                for col in forecast_df.columns:
+                    if 'Forecast' in col or 'CI' in col:
+                        forecast_df[col] = forecast_df[col].apply(lambda x: f"AED {x:,.0f}")
+                
+                st.dataframe(forecast_df, use_container_width=True)
+                
+                # Download button for forecast data
+                csv_data = forecast_df.to_csv()
+                st.download_button(
+                    label="📥 Download Forecast Data (CSV)",
+                    data=csv_data,
+                    file_name=f"advanced_forecast_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv"
+                )
+        
+    except Exception as e:
+        st.error(f"Error displaying forecast tables: {str(e)}")
 
 def display_3_month_forecast_table():
     """Display detailed 3-month forecast in table format"""
