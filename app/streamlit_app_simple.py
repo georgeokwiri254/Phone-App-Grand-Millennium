@@ -1014,6 +1014,9 @@ def daily_occupancy_tab():
         if database_available:
             db = get_database()
             df = db.get_occupancy_data()
+            # Map database column names back to CSV format for consistency
+            if 'Occ_Pct' in df.columns:
+                df['Occ%'] = df['Occ_Pct']
         else:
             df = pd.DataFrame()  # Empty dataframe if no database
     
@@ -1024,6 +1027,12 @@ def daily_occupancy_tab():
     # Ensure Date column is datetime
     if 'Date' in df.columns:
         df['Date'] = pd.to_datetime(df['Date'])
+    
+    # Ensure numeric columns are numeric
+    numeric_columns = ['Occ%', 'ADR', 'Revenue', 'Rms', 'Rm Sold', 'RevPar']
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     
     # Date range filter - Single date range picker
     st.subheader("📅 Date Range Filter")
@@ -5007,6 +5016,9 @@ def events_analysis_tab():
     else:
         if database_available:
             occupancy_data = get_database().get_occupancy_data()
+            # Map database column names back to CSV format for consistency
+            if 'Occ_Pct' in occupancy_data.columns:
+                occupancy_data['Occ%'] = occupancy_data['Occ_Pct']
         else:
             occupancy_data = pd.DataFrame()
     
@@ -8684,6 +8696,9 @@ def enhanced_forecasting_tab():
     else:
         if database_available:
             occupancy_data = get_database().get_occupancy_data()
+            # Map database column names back to CSV format for consistency
+            if 'Occ_Pct' in occupancy_data.columns:
+                occupancy_data['Occ%'] = occupancy_data['Occ_Pct']
         else:
             occupancy_data = pd.DataFrame()
     
@@ -9030,6 +9045,9 @@ def machine_learning_tab():
     else:
         if database_available:
             occupancy_data = get_database().get_occupancy_data()
+            # Map database column names back to CSV format for consistency
+            if 'Occ_Pct' in occupancy_data.columns:
+                occupancy_data['Occ%'] = occupancy_data['Occ_Pct']
         else:
             occupancy_data = pd.DataFrame()
     
