@@ -3520,38 +3520,38 @@ def block_analysis_tab():
     with block_subtabs[0]:  # Block EDA
         st.subheader("📈 Block EDA")
         
-        # Auto-select latest file on tab load
-        if 'auto_selected_block_eda' not in st.session_state:
-            st.session_state.auto_selected_block_eda = False
-            
-        if not st.session_state.auto_selected_block_eda:
-            import os
-            from datetime import datetime
-            default_path = r"P:\Revenue\Weekly Revenue Meeting\Revenue Room Reports\Revenue Room\Group Forecast"
-            if os.path.exists(default_path):
-                try:
-                    # Search for files matching the pattern "Block Data"
-                    pattern = "Block Data"
-                    matching_files = []
-                    
-                    for file in os.listdir(default_path):
-                        if pattern.lower() in file.lower() and file.lower().endswith('.txt'):
-                            full_path = os.path.join(default_path, file)
-                            mod_time = os.path.getmtime(full_path)
-                            matching_files.append((full_path, mod_time, file))
-                    
-                    if matching_files:
-                        # Sort by modification time (newest first)
-                        matching_files.sort(key=lambda x: x[1], reverse=True)
-                        latest_file = matching_files[0]
-                        selected_file_path = latest_file[0]
+        # One-button auto-process solution
+        st.markdown("### 🚀 Auto Process Latest Block Data")
+        col1, col2 = st.columns([2, 3])
+        with col1:
+            if st.button("🔄 Auto-Select, Load & Process Latest Block File", type="primary", key="auto_process_block"):
+                default_path = r"P:\Revenue\Weekly Revenue Meeting\Revenue Room Reports\Revenue Room\Group Forecast"
+                
+                with st.spinner("🔄 Auto-processing latest Block Data file..."):
+                    try:
+                        import os
+                        from datetime import datetime
                         
-                        st.success(f"🎯 Auto-selected latest block data file: {latest_file[2]}")
-                        st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
-                        
-                        # Auto-convert the selected file immediately
-                        with st.spinner("🔄 Auto-processing latest Block Data file..."):
-                            try:
+                        if os.path.exists(default_path):
+                            # Search for files matching the pattern "Block Data"
+                            pattern = "Block Data"
+                            matching_files = []
+                            
+                            for file in os.listdir(default_path):
+                                if pattern.lower() in file.lower() and file.lower().endswith('.txt'):
+                                    full_path = os.path.join(default_path, file)
+                                    mod_time = os.path.getmtime(full_path)
+                                    matching_files.append((full_path, mod_time, file))
+                            
+                            if matching_files:
+                                # Sort by modification time (newest first)
+                                matching_files.sort(key=lambda x: x[1], reverse=True)
+                                latest_file = matching_files[0]
+                                selected_file_path = latest_file[0]
+                                
+                                st.success(f"🎯 Auto-selected: {latest_file[2]}")
+                                st.info(f"📅 Modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
+                                
                                 # Create a file-like object from the selected file path
                                 class FileWrapper:
                                     def __init__(self, file_path):
@@ -3565,20 +3565,32 @@ def block_analysis_tab():
                                 
                                 file_wrapper = FileWrapper(selected_file_path)
                                 
-                                # Process using existing function
+                                # Process using existing function (includes load, ingest, process)
                                 process_block_data_file(file_wrapper)
-                                st.success("✅ Auto-conversion completed successfully!")
+                                st.success("✅ Auto-process completed successfully! Data loaded, ingested, and processed.")
                                 
-                                # Mark as auto-selected to prevent repeated processing
+                                # Reset session state to ensure fresh data
                                 st.session_state.auto_selected_block_eda = True
+                                st.rerun()
                                 
-                            except Exception as e:
-                                st.error(f"❌ Auto-conversion failed: {str(e)}")
-                                conversion_logger.error(f"Block Data auto-conversion error: {e}")
-                    else:
-                        st.warning(f"⚠️ No files matching pattern '{pattern}' found in {default_path}")
-                except Exception as e:
-                    st.error(f"❌ Error accessing path: {str(e)}")
+                            else:
+                                st.error(f"❌ No Block Data files found in {default_path}")
+                        else:
+                            st.error(f"❌ Path does not exist: {default_path}")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Auto-process failed: {str(e)}")
+                        if 'conversion_logger' in globals():
+                            conversion_logger.error(f"Block Data auto-process error: {e}")
+        
+        with col2:
+            st.info("💡 This button will automatically find the latest Block Data file, load it, ingest it into the database, and process it for analysis in one click.")
+        
+        st.markdown("---")
+        
+        # Initialize session state for block EDA tab
+        if 'auto_selected_block_eda' not in st.session_state:
+            st.session_state.auto_selected_block_eda = False
         
         # File upload section
         st.subheader("📁 Load Block Data")
