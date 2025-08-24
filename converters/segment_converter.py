@@ -159,11 +159,22 @@ def run_segment_conversion(excel_file_path, output_dir=None):
         df.to_csv(backup_csv_path, index=False)
         print(f"[OK] Saved backup to: {backup_csv_path}")
         
-        # Atomic write to canonical path
+        # Atomic write to canonical path (with fallback for locked files)
         temp_canonical = str(canonical_csv_path) + '.tmp'
         df.to_csv(temp_canonical, index=False)
-        shutil.move(temp_canonical, canonical_csv_path)
-        print(f"[OK] Saved canonical output to: {canonical_csv_path}")
+        
+        try:
+            shutil.move(temp_canonical, canonical_csv_path)
+            print(f"[OK] Saved canonical output to: {canonical_csv_path}")
+            final_path = str(canonical_csv_path)
+        except (PermissionError, FileExistsError) as e:
+            # File is locked - use backup as the return path
+            print(f"[WARNING] Cannot update canonical file (locked): {e}")
+            print(f"[OK] Using backup file as output: {backup_csv_path}")
+            # Clean up temp file
+            if os.path.exists(temp_canonical):
+                os.remove(temp_canonical)
+            final_path = str(backup_csv_path)
         
         # Clean up temporary file
         if os.path.exists(temp_output):
@@ -175,7 +186,7 @@ def run_segment_conversion(excel_file_path, output_dir=None):
             merged_segments = df['MergedSegment'].value_counts()
             print(f"[OK] Merged segments: {dict(merged_segments)}")
         
-        return df, str(canonical_csv_path)
+        return df, final_path
         
     except Exception as e:
         print(f"[ERROR] Segment conversion failed: {str(e)}")

@@ -57,13 +57,13 @@ class RevenueDatabase:
                     Index_Month_segment TEXT,
                     Segment TEXT,
                     Daily_Pick_up_Rooms REAL,
-                    Daily_Pick_up_ADR REAL,
                     Daily_Pick_up_Revenue REAL,
+                    Daily_Pick_up_ADR REAL,
                     Daily_Pick_up_Share REAL,
                     Dis_Daily REAL,
                     Month_to_Date_Rooms REAL,
-                    Month_to_Date_ADR REAL,
                     Month_to_Date_Revenue REAL,
+                    Month_to_Date_ADR REAL,
                     Month_to_Date_Share REAL,
                     Dis_MTD REAL,
                     Business_on_the_Books_Rooms REAL,
@@ -357,6 +357,16 @@ class RevenueDatabase:
         """
         try:
             logger.info(f"Ingesting segment data: {len(df)} rows")
+            
+            # Force drop and recreate table with correct schema
+            cursor = self.connection.cursor()
+            cursor.execute("DROP TABLE IF EXISTS segment_analysis")
+            self.connection.commit()
+            logger.info("Dropped existing segment_analysis table")
+            
+            # Recreate table with correct schema
+            self._create_schema()
+            logger.info("Recreated segment_analysis table with correct schema")
             
             # CSV now has correct column names from MHR processor - no mapping needed
             df_clean = df.copy()

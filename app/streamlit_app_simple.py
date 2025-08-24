@@ -433,11 +433,21 @@ def dashboard_tab():
                                 
                                 # Check if converters are available
                                 if converters_available:
-                                    # Run segment converter
-                                    segment_df, segment_csv = run_segment_conversion(selected_file_path)
+                                    try:
+                                        # Run segment converter
+                                        segment_df, segment_csv = run_segment_conversion(selected_file_path)
+                                        conversion_logger.info(f"Segment conversion completed: {segment_csv}")
+                                    except Exception as e:
+                                        conversion_logger.error(f"Segment conversion error: {e}")
+                                        raise Exception(f"Segment conversion failed: {e}")
                                     
-                                    # Run occupancy converter
-                                    occupancy_df, occupancy_csv = run_occupancy_conversion(selected_file_path)
+                                    try:
+                                        # Run occupancy converter
+                                        occupancy_df, occupancy_csv = run_occupancy_conversion(selected_file_path)
+                                        conversion_logger.info(f"Occupancy conversion completed: {occupancy_csv}")
+                                    except Exception as e:
+                                        conversion_logger.error(f"Occupancy conversion error: {e}")
+                                        raise Exception(f"Occupancy conversion failed: {e}")
                                     
                                     conversion_status.success("✅ Auto-conversion completed successfully!")
                                     
@@ -675,6 +685,10 @@ def show_bob_vs_budget_table():
             st.error("No segment data available for BOB vs Budget analysis")
             return
         
+        # Convert revenue columns to numeric
+        df['Business_on_the_Books_Revenue'] = pd.to_numeric(df['Business_on_the_Books_Revenue'], errors='coerce').fillna(0)
+        df['Budget_This_Year_Revenue'] = pd.to_numeric(df['Budget_This_Year_Revenue'], errors='coerce').fillna(0)
+        
         # Create table data
         table_data = []
         
@@ -751,8 +765,8 @@ def show_merged_segment_daily_pickup():
             st.error("No segment data available for merged segment analysis")
             return
         
-        # Ensure we have the required columns (Column E is Daily_Pick_up_ADR)
-        required_columns = ['Month', 'Daily_Pick_up_ADR', 'MergedSegment']
+        # Ensure we have the required columns (Column E is Daily_Pick_up_Revenue)
+        required_columns = ['Month', 'Daily_Pick_up_Revenue', 'MergedSegment']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             st.error(f"Missing required columns: {missing_columns}")
@@ -797,8 +811,11 @@ def show_merged_segment_daily_pickup():
             st.warning("No data available for the selected period")
             return
         
-        # Get the 6 merged segments with highest total ADR
-        segment_totals = df_filtered.groupby('MergedSegment')['Daily_Pick_up_ADR'].sum().sort_values(ascending=False)
+        # Convert Daily_Pick_up_Revenue to numeric before calculations
+        df_filtered['Daily_Pick_up_Revenue'] = pd.to_numeric(df_filtered['Daily_Pick_up_Revenue'], errors='coerce').fillna(0)
+        
+        # Get the 6 merged segments with highest total Revenue
+        segment_totals = df_filtered.groupby('MergedSegment')['Daily_Pick_up_Revenue'].sum().sort_values(ascending=False)
         top_6_segments = segment_totals.head(6).index.tolist()
         
         # Filter to top 6 segments
@@ -808,7 +825,7 @@ def show_merged_segment_daily_pickup():
         pivot_df = df_top6.pivot_table(
             index='MergedSegment',
             columns='Month',
-            values='Daily_Pick_up_ADR',
+            values='Daily_Pick_up_Revenue',
             aggfunc='sum',
             fill_value=0
         )
@@ -866,7 +883,7 @@ def show_merged_segment_daily_pickup():
         # Show legend
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("🟢 **Green**: Highest ADR value per month")
+            st.markdown("🟢 **Green**: Highest revenue")
         with col2:
             st.markdown("🔴 **Red**: Negative values")
         
@@ -886,11 +903,11 @@ def show_merged_segment_daily_pickup():
             
             for segment in top_6_segments:
                 segment_data = df_top6[df_top6['MergedSegment'] == segment]
-                monthly_data = segment_data.groupby('Month')['Daily_Pick_up_ADR'].sum().reset_index()
+                monthly_data = segment_data.groupby('Month')['Daily_Pick_up_Revenue'].sum().reset_index()
                 
                 fig_line.add_trace(go.Scatter(
                     x=monthly_data['Month'],
-                    y=monthly_data['Daily_Pick_up_ADR'],
+                    y=monthly_data['Daily_Pick_up_Revenue'],
                     mode='lines+markers',
                     name=segment,
                     line=dict(width=3),
@@ -898,9 +915,9 @@ def show_merged_segment_daily_pickup():
                 ))
             
             fig_line.update_layout(
-                title="Daily Pick Up ADR Trends by Merged Segment",
+                title="Daily Pick Up Revenue Trends by Merged Segment",
                 xaxis_title="Month",
-                yaxis_title="Daily Pickup ADR (AED)",
+                yaxis_title="Daily Pickup Revenue (AED)",
                 hovermode='x unified',
                 showlegend=True
             )
@@ -908,19 +925,19 @@ def show_merged_segment_daily_pickup():
             st.plotly_chart(fig_line, use_container_width=True)
         
         with chart_tab2:
-            # Pie chart showing total ADR share by segment
-            total_by_segment = df_top6.groupby('MergedSegment')['Daily_Pick_up_ADR'].sum().reset_index()
+            # Pie chart showing total Revenue share by segment
+            total_by_segment = df_top6.groupby('MergedSegment')['Daily_Pick_up_Revenue'].sum().reset_index()
             
             fig_pie = go.Figure(data=[go.Pie(
                 labels=total_by_segment['MergedSegment'],
-                values=total_by_segment['Daily_Pick_up_ADR'],
+                values=total_by_segment['Daily_Pick_up_Revenue'],
                 hole=0.3,
                 textinfo='label+percent',
                 textposition='outside'
             )])
             
             fig_pie.update_layout(
-                title="Daily Pick Up ADR Share by Merged Segment",
+                title="Daily Pick Up Revenue Share by Merged Segment",
                 showlegend=True
             )
             
@@ -942,9 +959,9 @@ def show_merged_segment_daily_pickup():
                 ))
             
             fig_bar.update_layout(
-                title="Daily Pick Up ADR Comparison by Segment and Month",
+                title="Daily Pick Up Revenue Comparison by Segment and Month",
                 xaxis_title="Merged Segment",
-                yaxis_title="Daily Pickup ADR (AED)",
+                yaxis_title="Daily Pickup Revenue (AED)",
                 barmode='group',
                 showlegend=True
             )
@@ -952,17 +969,17 @@ def show_merged_segment_daily_pickup():
             st.plotly_chart(fig_bar, use_container_width=True)
         
         # Show segment summary statistics
-        with st.expander("📊 Segment Summary Statistics"):
-            total_adr = df_top6['Daily_Pick_up_ADR'].sum()
-            avg_adr = df_top6['Daily_Pick_up_ADR'].mean()
+        with st.expander("📊 Revenue"):
+            total_revenue = df_top6['Daily_Pick_up_Revenue'].sum()
+            avg_revenue = df_top6['Daily_Pick_up_Revenue'].mean()
             
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Total ADR (Top 6)", f"AED {total_adr:,.0f}")
+                st.metric("Total Revenue (Top 6)", f"AED {total_revenue:,.0f}")
             with col2:
-                st.metric("Average ADR", f"AED {avg_adr:,.0f}")
+                st.metric("Average Revenue", f"AED {avg_revenue:,.0f}")
             with col3:
-                negative_count = (df_top6['Daily_Pick_up_ADR'] < 0).sum()
+                negative_count = (df_top6['Daily_Pick_up_Revenue'] < 0).sum()
                 st.metric("Negative Values", negative_count)
             with col4:
                 st.metric("Segments Displayed", len(top_6_segments))
@@ -1967,8 +1984,10 @@ def segment_analysis_tab():
     with analysis_tab:
         st.subheader("📊 Revenue Analysis")
         
+        
         # Check if data is loaded
         if not st.session_state.data_loaded:
+            st.warning("Data not loaded - showing loading requirements")
             show_loading_requirements()
             return
         
@@ -2042,6 +2061,71 @@ def segment_analysis_tab():
         if segment_col not in filtered_df.columns:
             st.error(f"Segment column '{segment_col}' not found in data")
             return
+        
+        # Month_to_Date_Revenue KPI Section (independent of variance analysis)
+        if 'Month_to_Date_Revenue' in filtered_df.columns:
+            st.success("✅ Month_to_Date_Revenue column found!")
+            st.markdown("---")
+            st.markdown("### 💰 Month-to-Date Revenue KPIs")
+            
+            # Convert Month_to_Date_Revenue to numeric
+            filtered_df['Month_to_Date_Revenue'] = pd.to_numeric(filtered_df['Month_to_Date_Revenue'], errors='coerce').fillna(0)
+            
+            # Calculate monthly aggregation for segments
+            mtd_summary = filtered_df.groupby(segment_col).agg({
+                'Month_to_Date_Revenue': 'sum'
+            }).reset_index()
+            mtd_summary = mtd_summary.sort_values('Month_to_Date_Revenue', ascending=False)
+            
+            # Display KPI metrics
+            kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+            
+            with kpi_col1:
+                total_mtd = mtd_summary['Month_to_Date_Revenue'].sum()
+                st.metric("Total MTD Revenue", f"AED {total_mtd:,.0f}")
+            
+            with kpi_col2:
+                avg_mtd = mtd_summary['Month_to_Date_Revenue'].mean()
+                st.metric("Average MTD per Segment", f"AED {avg_mtd:,.0f}")
+            
+            with kpi_col3:
+                top_segment = mtd_summary.iloc[0] if len(mtd_summary) > 0 else None
+                if top_segment is not None:
+                    st.metric("Top MTD Segment", f"{top_segment[segment_col][:15]}", f"AED {top_segment['Month_to_Date_Revenue']:,.0f}")
+                else:
+                    st.metric("Top MTD Segment", "No data")
+            
+            with kpi_col4:
+                positive_segments = (mtd_summary['Month_to_Date_Revenue'] > 0).sum()
+                st.metric("Active Segments", f"{positive_segments}/{len(mtd_summary)}")
+            
+            # Show top 5 segments table
+            if len(mtd_summary) > 0:
+                st.markdown("#### 📊 Top Month-to-Date Revenue by Segment")
+                top_5_mtd = mtd_summary.head(5).copy()
+                top_5_mtd['Month_to_Date_Revenue'] = top_5_mtd['Month_to_Date_Revenue'].apply(lambda x: f"AED {x:,.0f}")
+                top_5_mtd = top_5_mtd.rename(columns={
+                    segment_col: 'Segment',
+                    'Month_to_Date_Revenue': 'MTD Revenue'
+                })
+                st.dataframe(top_5_mtd, hide_index=True, use_container_width=True)
+        else:
+            st.warning("❌ Month_to_Date_Revenue column not found!")
+            st.info("💡 Session state has old data structure - need to clear cache")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔄 Clear Session Cache"):
+                    # Clear segment data from session state
+                    if hasattr(st.session_state, 'segment_data'):
+                        st.session_state.segment_data = None
+                    if hasattr(st.session_state, 'data_loaded'):
+                        st.session_state.data_loaded = False
+                    st.success("Cache cleared! Refresh the page.")
+                    st.rerun()
+            
+            with col2:
+                st.write("Or restart the Streamlit app completely.")
         
         # Required columns for variance analysis
         required_columns = [

@@ -146,13 +146,13 @@ def process_mhr_pickup_report(file_path, output_path=None):
         'Index_Month_segment',                                          # B
         'Segment',                                                      # C
         'Daily_Pick_up_Rooms',                                          # D
-        'Daily_Pick_up_ADR',                                            # E
-        'Daily_Pick_up_Revenue',                                        # F
+        'Daily_Pick_up_Revenue',                                        # E
+        'Daily_Pick_up_ADR',                                            # F
         'Daily_Pick_up_Share',                                          # G
         'Dis_Daily',                                                    # H
         'Month_to_Date_Rooms',                                          # I
-        'Month_to_Date_ADR',                                            # J
-        'Month_to_Date_Revenue',                                        # K
+        'Month_to_Date_Revenue',                                        # J
+        'Month_to_Date_ADR',                                            # K
         'Month_to_Date_Share',                                          # L
         'Dis_MTD',                                                      # M
         'Business_on_the_Books_Rooms',                                 # N

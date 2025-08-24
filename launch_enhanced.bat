@@ -3,10 +3,11 @@ title Grand Millennium Revenue Analytics - Enhanced Launcher
 cd /d "%~dp0"
 
 echo ====================================================================
-echo  Grand Millennium Revenue Analytics - Enhanced Launcher
+echo  🏨 Grand Millennium Revenue Analytics - Enhanced Launcher
 echo ====================================================================
 echo.
-echo  This launcher includes automatic port conflict resolution:
+echo  🚀 Logo-enabled launcher available: Grand_Millennium_Analytics_Launcher.exe
+echo  📊 This launcher includes automatic port conflict resolution:
 echo  - Detects if port 8511 is in use
 echo  - Offers to kill the conflicting process
 echo  - Can automatically find the next available port
