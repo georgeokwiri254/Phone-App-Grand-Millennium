@@ -409,8 +409,12 @@ def dashboard_tab():
                             st.success(f"✅ Found latest file: {latest_file[2]}")
                             st.info(f"📅 Last modified: {datetime.fromtimestamp(latest_file[1]).strftime('%Y-%m-%d %H:%M:%S')}")
                             
-                            # Mark that auto-processing is happening
+                            # Reset all session state variables to ensure fresh processing
+                            st.session_state.data_loaded = False
+                            st.session_state.segment_data = None
+                            st.session_state.occupancy_data = None
                             st.session_state.auto_processing_complete = False
+                            st.session_state.last_run_timestamp = None
                             
                             # Auto-convert the selected file immediately
                             conversion_status = st.empty()
@@ -444,12 +448,16 @@ def dashboard_tab():
                                             db_status.success("✅ Data loaded to database successfully!")
                                             st.session_state.data_loaded = True
                                             st.session_state.auto_processing_complete = True
+                                            # Force a rerun to refresh all dashboard components with new data
+                                            st.rerun()
                                         else:
                                             db_status.error("❌ Failed to load some data to database")
                                     else:
                                         st.warning("⚠️ Database not available - data processed but not stored")
                                         st.session_state.data_loaded = True
                                         st.session_state.auto_processing_complete = True
+                                        # Force a rerun to refresh all dashboard components with new data
+                                        st.rerun()
                                 else:
                                     conversion_status.error("❌ Converters not available")
                                     
@@ -474,6 +482,13 @@ def dashboard_tab():
     
     # Handle uploaded file
     if uploaded_file is not None:
+        # Reset all session state variables to ensure fresh processing
+        st.session_state.data_loaded = False
+        st.session_state.segment_data = None
+        st.session_state.occupancy_data = None
+        st.session_state.auto_processing_complete = False
+        st.session_state.last_run_timestamp = None
+        
         # Clean up any previous uploaded files
         for old_file in project_root.glob("uploaded_*"):
             try:
@@ -496,6 +511,8 @@ def dashboard_tab():
         
         if success:
             st.success("✅ Conversion completed successfully!")
+            # Force a rerun to refresh all dashboard components with new data
+            st.rerun()
         else:
             st.error("❌ Processing failed")
     
@@ -8828,6 +8845,7 @@ def controls_logs_tab():
         st.session_state.data_loaded = False
         st.session_state.segment_data = None
         st.session_state.occupancy_data = None
+        st.session_state.auto_processing_complete = False
         st.session_state.last_run_timestamp = None
         st.success("Cache cleared. Please go to Dashboard tab to reload data.")
     
