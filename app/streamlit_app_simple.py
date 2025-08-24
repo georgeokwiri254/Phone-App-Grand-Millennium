@@ -2958,6 +2958,142 @@ def str_report_tab():
     """STR Report Tab - Smith Travel Research EDA Analysis"""
     st.header("📊 STR EDA Analysis (Smith Travel Research)")
     
+    # One-button auto-process solution
+    st.markdown("### 🚀 Auto Process Latest STR Data")
+    col1, col2 = st.columns([2, 3])
+    with col1:
+        if st.button("🔄 Auto-Select, Load & Process Latest STR File", type="primary", key="auto_process_str"):
+            base_path = r"P:\Morning-Meeting"
+            
+            with st.spinner("🔄 Auto-processing latest STR file from Morning-Meeting folders..."):
+                try:
+                    import os
+                    from datetime import datetime
+                    
+                    if os.path.exists(base_path):
+                        st.info("🔍 Step 1: Looking for latest month folder...")
+                        
+                        # Find all month folders in P:\Morning-Meeting\
+                        month_folders = []
+                        for item in os.listdir(base_path):
+                            item_path = os.path.join(base_path, item)
+                            if os.path.isdir(item_path):
+                                mod_time = os.path.getmtime(item_path)
+                                month_folders.append((item_path, mod_time, item))
+                        
+                        if not month_folders:
+                            st.error("❌ No month folders found in Morning-Meeting directory")
+                            return
+                        
+                        # Sort month folders by modification time (newest first)
+                        month_folders.sort(key=lambda x: x[1], reverse=True)
+                        latest_month_folder = month_folders[0]
+                        latest_month_path, latest_month_mod_time, latest_month_name = latest_month_folder
+                        
+                        st.success(f"✅ Found latest month folder: {latest_month_name}")
+                        st.info(f"📅 Month folder modified: {datetime.fromtimestamp(latest_month_mod_time).strftime('%Y-%m-%d %H:%M:%S')}")
+                        
+                        st.info("🔍 Step 2: Looking for latest date folder in month...")
+                        
+                        # Find all date folders within the latest month folder
+                        date_folders = []
+                        try:
+                            for item in os.listdir(latest_month_path):
+                                item_path = os.path.join(latest_month_path, item)
+                                if os.path.isdir(item_path):
+                                    mod_time = os.path.getmtime(item_path)
+                                    date_folders.append((item_path, mod_time, item))
+                        except PermissionError:
+                            st.error(f"❌ No access to month folder: {latest_month_name}")
+                            return
+                        except Exception as e:
+                            st.error(f"❌ Error accessing month folder {latest_month_name}: {str(e)}")
+                            return
+                        
+                        if not date_folders:
+                            st.error(f"❌ No date folders found in month folder: {latest_month_name}")
+                            return
+                        
+                        # Sort date folders by modification time (newest first)
+                        date_folders.sort(key=lambda x: x[1], reverse=True)
+                        latest_date_folder = date_folders[0]
+                        latest_date_path, latest_date_mod_time, latest_date_name = latest_date_folder
+                        
+                        st.success(f"✅ Found latest date folder: {latest_date_name}")
+                        st.info(f"📅 Date folder modified: {datetime.fromtimestamp(latest_date_mod_time).strftime('%Y-%m-%d %H:%M:%S')}")
+                        
+                        st.info("🔍 Step 3: Looking for STR files in latest date folder...")
+                        
+                        # Look for STR files in the latest date folder
+                        latest_str_file = None
+                        try:
+                            str_files = []
+                            for file in os.listdir(latest_date_path):
+                                if file.lower().startswith('str') and file.lower().endswith(('.xls', '.xlsx')):
+                                    file_path = os.path.join(latest_date_path, file)
+                                    file_mod_time = os.path.getmtime(file_path)
+                                    str_files.append((file_path, file_mod_time, file, f"{latest_month_name}/{latest_date_name}"))
+                            
+                            if str_files:
+                                # If we found STR files, use the most recent one
+                                str_files.sort(key=lambda x: x[1], reverse=True)
+                                latest_str_file = str_files[0]
+                                st.success(f"✅ Found STR file: {latest_str_file[2]} in {latest_month_name}/{latest_date_name}")
+                            else:
+                                st.error(f"❌ No STR files found in latest date folder: {latest_month_name}/{latest_date_name}")
+                                
+                        except PermissionError:
+                            st.error(f"❌ No access to date folder: {latest_month_name}/{latest_date_name}")
+                            return
+                        except Exception as e:
+                            st.error(f"❌ Error accessing date folder {latest_month_name}/{latest_date_name}: {str(e)}")
+                            return
+                        
+                        if latest_str_file:
+                            file_path, file_mod_time, file_name, folder_name = latest_str_file
+                            
+                            st.success(f"🎯 Auto-selected: {file_name}")
+                            st.info(f"📁 Folder: {folder_name}")
+                            st.info(f"📅 Modified: {datetime.fromtimestamp(file_mod_time).strftime('%Y-%m-%d %H:%M:%S')}")
+                            
+                            # Process the STR file using the existing logic
+                            try:
+                                # Import STR converter
+                                import sys
+                                sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'converters'))
+                                from str_converter import process_str_file, validate_str_data, get_str_summary_stats
+                                
+                                # Process the STR file
+                                str_df, csv_path = process_str_file(file_path)
+                                
+                                # Validate the data
+                                if validate_str_data(str_df):
+                                    # Store in session state
+                                    st.session_state.str_data = str_df
+                                    st.session_state.str_data_loaded = True
+                                    
+                                    st.success("✅ Auto-process completed successfully! STR data loaded, converted, and processed.")
+                                    st.rerun()
+                                    
+                                else:
+                                    st.error("❌ STR data validation failed")
+                                    
+                            except ImportError:
+                                st.error("❌ STR converter not available. Please ensure str_converter.py is in the converters folder.")
+                            except Exception as e:
+                                st.error(f"❌ Error processing STR file: {str(e)}")
+                    else:
+                        st.error(f"❌ Path does not exist: {base_path}")
+                        st.info("💡 Check if the P:\Morning-Meeting\ directory exists and is accessible")
+                        
+                except Exception as e:
+                    st.error(f"❌ Auto-process failed: {str(e)}")
+    
+    with col2:
+        st.info("💡 This button will automatically find the latest STR.xls file from the Morning-Meeting folder structure, load it, convert it, and process it for analysis in one click.")
+    
+    st.markdown("---")
+    
     # File upload and conversion section
     st.subheader("📁 Upload STR Data")
     
