@@ -2779,7 +2779,7 @@ def adr_analysis_tab():
     
     # Controls
     st.subheader("📊 Analysis Controls")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         data_source = st.selectbox(
@@ -2797,6 +2797,10 @@ def adr_analysis_tab():
             )
         else:
             use_merged_segments = False
+    
+    with col3:
+        # Monthly filter placeholder - will be populated after data is selected
+        monthly_filter_placeholder = st.empty()
     
     # Determine which data to use
     if data_source == "Segment Data" and segment_data is not None and not segment_data.empty:
@@ -2829,6 +2833,42 @@ def adr_analysis_tab():
     df[adr_column] = pd.to_numeric(df[adr_column], errors='coerce')
     df = df.dropna(subset=[adr_column])
     df = df[df[adr_column] > 0]  # Remove zero or negative ADR values
+    
+    # Add monthly filter
+    selected_months = None
+    if date_column and date_column in df.columns:
+        # Ensure date column is datetime for monthly filtering
+        df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
+        df = df.dropna(subset=[date_column])
+        
+        if not df.empty:
+            # Extract month-year for filtering
+            df['Month_Year'] = df[date_column].dt.to_period('M')
+            available_months = sorted(df['Month_Year'].unique())
+            
+            if available_months:
+                # Populate the monthly filter
+                with monthly_filter_placeholder.container():
+                    selected_months = st.multiselect(
+                        "Filter by Month:",
+                        options=available_months,
+                        default=available_months,  # All months selected by default
+                        format_func=lambda x: str(x),
+                        help="Select specific months to analyze"
+                    )
+                
+                # Apply monthly filter
+                if selected_months:
+                    df = df[df['Month_Year'].isin(selected_months)]
+    
+    # Check if we still have data after filtering
+    if df.empty:
+        st.error("No data available after applying filters. Please adjust your selection.")
+        return
+    
+    # Show filtered period info
+    if selected_months and len(selected_months) < len(available_months):
+        st.info(f"📅 Showing ADR analysis for {len(selected_months)} selected months out of {len(available_months)} available months")
     
     # Key metrics
     st.subheader("📈 ADR Summary Statistics")
@@ -3046,6 +3086,163 @@ def adr_analysis_tab():
         st.dataframe(sample_outliers_display, use_container_width=True)
     else:
         st.info("No outliers detected using the IQR method.")
+
+def weekly_analysis_tab():
+    """Weekly Analysis Tab - Weekly patterns and trends"""
+    st.header("📅 Weekly Analysis")
+    
+    if not st.session_state.data_loaded:
+        st.warning("⚠️ No data loaded. Please load data from the Dashboard tab first.")
+        if st.button("Go to Dashboard"):
+            st.session_state.current_tab = "Dashboard"
+            st.rerun()
+        return
+    
+    try:
+        # Get cached data
+        segment_df = st.session_state.get('segment_df')
+        occupancy_df = st.session_state.get('occupancy_df')
+        
+        if segment_df is None or occupancy_df is None:
+            st.warning("No cached data available.")
+            return
+        
+        st.markdown("### 📊 Weekly Revenue Patterns")
+        
+        # Weekly revenue analysis from segment data
+        if not segment_df.empty and 'Month' in segment_df.columns:
+            # Convert Month to datetime if it's not already
+            segment_df_copy = segment_df.copy()
+            if segment_df_copy['Month'].dtype == 'object':
+                segment_df_copy['Month'] = pd.to_datetime(segment_df_copy['Month'])
+            
+            # Add week number and day of week
+            segment_df_copy['Week'] = segment_df_copy['Month'].dt.isocalendar().week
+            segment_df_copy['WeekDay'] = segment_df_copy['Month'].dt.day_name()
+            segment_df_copy['Year'] = segment_df_copy['Month'].dt.year
+            
+            # Weekly revenue aggregation
+            weekly_revenue = segment_df_copy.groupby(['Year', 'Week'])['BusinessOnTheBooksRevenue'].sum().reset_index()
+            weekly_revenue['Week_Label'] = weekly_revenue['Year'].astype(str) + '-W' + weekly_revenue['Week'].astype(str).str.zfill(2)
+            
+            fig = px.line(weekly_revenue, x='Week_Label', y='BusinessOnTheBooksRevenue',
+                         title='📈 Weekly Revenue Trends',
+                         labels={'BusinessOnTheBooksRevenue': 'Revenue (AED)', 'Week_Label': 'Week'})
+            fig.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Weekly occupancy patterns
+        st.markdown("### 🏨 Weekly Occupancy Patterns")
+        
+        if not occupancy_df.empty and 'Date' in occupancy_df.columns:
+            occupancy_df_copy = occupancy_df.copy()
+            
+            # Convert Date to datetime if it's not already
+            if occupancy_df_copy['Date'].dtype == 'object':
+                occupancy_df_copy['Date'] = pd.to_datetime(occupancy_df_copy['Date'])
+            
+            # Add day of week and week number
+            occupancy_df_copy['DayOfWeek'] = occupancy_df_copy['Date'].dt.day_name()
+            occupancy_df_copy['Week'] = occupancy_df_copy['Date'].dt.isocalendar().week
+            occupancy_df_copy['Year'] = occupancy_df_copy['Date'].dt.year
+            
+            # Day of week pattern
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if 'OccPct' in occupancy_df_copy.columns:
+                    dow_occ = occupancy_df_copy.groupby('DayOfWeek')['OccPct'].mean().reset_index()
+                    # Order days properly
+                    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                    dow_occ['DayOfWeek'] = pd.Categorical(dow_occ['DayOfWeek'], categories=day_order, ordered=True)
+                    dow_occ = dow_occ.sort_values('DayOfWeek')
+                    
+                    fig = px.bar(dow_occ, x='DayOfWeek', y='OccPct',
+                               title='🔄 Average Occupancy by Day of Week',
+                               labels={'OccPct': 'Occupancy %', 'DayOfWeek': 'Day'})
+                    fig.update_layout(xaxis_tickangle=-45)
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                if 'ADR' in occupancy_df_copy.columns:
+                    dow_adr = occupancy_df_copy.groupby('DayOfWeek')['ADR'].mean().reset_index()
+                    # Order days properly
+                    dow_adr['DayOfWeek'] = pd.Categorical(dow_adr['DayOfWeek'], categories=day_order, ordered=True)
+                    dow_adr = dow_adr.sort_values('DayOfWeek')
+                    
+                    fig = px.bar(dow_adr, x='DayOfWeek', y='ADR',
+                               title='💰 Average ADR by Day of Week',
+                               labels={'ADR': 'ADR (AED)', 'DayOfWeek': 'Day'})
+                    fig.update_layout(xaxis_tickangle=-45)
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            # Weekly summary table
+            st.markdown("### 📋 Weekly Performance Summary")
+            
+            # Calculate weekly metrics
+            weekly_metrics = occupancy_df_copy.groupby(['Year', 'Week']).agg({
+                'OccPct': 'mean',
+                'ADR': 'mean',
+                'DailyRevenue': 'sum',
+                'RoomsSold': 'sum'
+            }).round(2).reset_index()
+            
+            weekly_metrics['Week_Label'] = weekly_metrics['Year'].astype(str) + '-W' + weekly_metrics['Week'].astype(str).str.zfill(2)
+            weekly_metrics = weekly_metrics[['Week_Label', 'OccPct', 'ADR', 'DailyRevenue', 'RoomsSold']].tail(10)
+            
+            # Format for display
+            weekly_metrics_display = weekly_metrics.copy()
+            weekly_metrics_display.columns = ['Week', 'Avg Occupancy %', 'Avg ADR (AED)', 'Total Revenue (AED)', 'Total Rooms Sold']
+            weekly_metrics_display['Avg ADR (AED)'] = weekly_metrics_display['Avg ADR (AED)'].apply(lambda x: f"AED {x:,.0f}")
+            weekly_metrics_display['Total Revenue (AED)'] = weekly_metrics_display['Total Revenue (AED)'].apply(lambda x: f"AED {x:,.0f}")
+            
+            st.dataframe(weekly_metrics_display, use_container_width=True)
+        
+        # Week-over-week comparison
+        st.markdown("### 📊 Week-over-Week Analysis")
+        
+        if not weekly_metrics.empty and len(weekly_metrics) >= 2:
+            latest_week = weekly_metrics.iloc[-1]
+            previous_week = weekly_metrics.iloc[-2]
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                occ_change = latest_week['OccPct'] - previous_week['OccPct']
+                st.metric(
+                    "Occupancy %",
+                    f"{latest_week['OccPct']:.1f}%",
+                    f"{occ_change:+.1f}%"
+                )
+            
+            with col2:
+                adr_change = latest_week['ADR'] - previous_week['ADR']
+                st.metric(
+                    "ADR (AED)",
+                    f"AED {latest_week['ADR']:,.0f}",
+                    f"AED {adr_change:+,.0f}"
+                )
+            
+            with col3:
+                rev_change = latest_week['DailyRevenue'] - previous_week['DailyRevenue']
+                st.metric(
+                    "Weekly Revenue (AED)",
+                    f"AED {latest_week['DailyRevenue']:,.0f}",
+                    f"AED {rev_change:+,.0f}"
+                )
+            
+            with col4:
+                rooms_change = latest_week['RoomsSold'] - previous_week['RoomsSold']
+                st.metric(
+                    "Rooms Sold",
+                    f"{latest_week['RoomsSold']:,.0f}",
+                    f"{rooms_change:+,.0f}"
+                )
+        
+    except Exception as e:
+        st.error(f"Error in weekly analysis: {str(e)}")
+        if app_logger:
+            app_logger.error(f"Weekly analysis error: {str(e)}")
 
 def str_report_tab():
     """STR Report Tab - Smith Travel Research EDA Analysis"""
@@ -9022,6 +9219,474 @@ def enhanced_forecasting_tab():
                         st.error("❌ Could not generate current month prediction")
                 except Exception as e:
                     st.error(f"❌ Error generating current month prediction: {str(e)}")
+    
+    # What If Scenario Analysis Section
+    st.markdown("---")
+    st.subheader("🎯 What If Scenario Analysis")
+    st.info("Analyze revenue impact of ADR/Occupancy changes and track current month pickup requirements")
+    
+    # Create tabs for different scenario analyses
+    scenario_tab1, scenario_tab2, scenario_tab3 = st.tabs(["ADR Impact", "Occupancy Impact", "Current Month Pickup"])
+    
+    with scenario_tab1:
+        st.subheader("💰 ADR Drop Impact Analysis")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            target_month = st.selectbox(
+                "Select Month for Analysis",
+                options=["Current Month", "Next Month", "Month +2", "Month +3"],
+                key="adr_month_select"
+            )
+            adr_drop_percent = st.slider(
+                "ADR Drop Percentage",
+                min_value=1,
+                max_value=50,
+                value=10,
+                step=1,
+                key="adr_drop_slider",
+                help="Percentage drop in ADR to analyze"
+            )
+        
+        with col2:
+            st.write("**Current ADR Analysis**")
+            if not occupancy_data.empty:
+                current_adr = occupancy_data['ADR'].mean() if 'ADR' in occupancy_data.columns else 0
+                st.metric("Current Average ADR", f"AED {current_adr:.2f}")
+                
+                new_adr = current_adr * (1 - adr_drop_percent / 100)
+                st.metric(
+                    f"ADR After {adr_drop_percent}% Drop", 
+                    f"AED {new_adr:.2f}",
+                    delta=f"-AED {current_adr - new_adr:.2f}"
+                )
+        
+        if st.button("Calculate ADR Impact", key="calc_adr_impact"):
+            if not occupancy_data.empty:
+                with st.spinner("Calculating revenue impact..."):
+                    try:
+                        # Get recent occupancy data for calculation
+                        recent_data = occupancy_data.tail(30)  # Last 30 days
+                        
+                        # Handle different column name variations
+                        if 'RoomsSold' in recent_data.columns:
+                            avg_rooms_sold = recent_data['RoomsSold'].mean()
+                        elif 'Rooms_Sold' in recent_data.columns:
+                            avg_rooms_sold = recent_data['Rooms_Sold'].mean()
+                        elif 'Rooms' in recent_data.columns:
+                            avg_rooms_sold = recent_data['Rooms'].mean() * 0.75  # Estimate 75% occupancy
+                        else:
+                            # Default fallback
+                            avg_rooms_sold = 150  # Default assumption
+                            st.warning("Using default rooms sold estimate (150 rooms/day)")
+                            
+                        avg_days_per_month = 30
+                        
+                        current_monthly_revenue = current_adr * avg_rooms_sold * avg_days_per_month
+                        new_monthly_revenue = new_adr * avg_rooms_sold * avg_days_per_month
+                        revenue_impact = current_monthly_revenue - new_monthly_revenue
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric(
+                                "Current Monthly Revenue",
+                                f"AED {current_monthly_revenue:,.0f}"
+                            )
+                        
+                        with col2:
+                            st.metric(
+                                "Revenue After ADR Drop",
+                                f"AED {new_monthly_revenue:,.0f}",
+                                delta=f"-AED {revenue_impact:,.0f}"
+                            )
+                        
+                        with col3:
+                            st.metric(
+                                "Revenue Loss",
+                                f"AED {revenue_impact:,.0f}",
+                                delta=f"-{(revenue_impact/current_monthly_revenue)*100:.1f}%"
+                            )
+                        
+                        # Show visualization
+                        fig_adr = go.Figure()
+                        
+                        fig_adr.add_trace(go.Bar(
+                            name='Current Revenue',
+                            x=[target_month],
+                            y=[current_monthly_revenue],
+                            marker_color='lightblue'
+                        ))
+                        
+                        fig_adr.add_trace(go.Bar(
+                            name=f'Revenue after {adr_drop_percent}% ADR drop',
+                            x=[target_month],
+                            y=[new_monthly_revenue],
+                            marker_color='lightcoral'
+                        ))
+                        
+                        fig_adr.update_layout(
+                            title=f"Revenue Impact of {adr_drop_percent}% ADR Drop",
+                            xaxis_title="Period",
+                            yaxis_title="Revenue (AED)",
+                            barmode='group',
+                            height=400
+                        )
+                        
+                        st.plotly_chart(fig_adr, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error calculating ADR impact: {str(e)}")
+            else:
+                st.warning("No occupancy data available for ADR analysis")
+    
+    with scenario_tab2:
+        st.subheader("🏨 Occupancy Drop Impact Analysis")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            target_month_occ = st.selectbox(
+                "Select Month for Analysis",
+                options=["Current Month", "Next Month", "Month +2", "Month +3"],
+                key="occ_month_select"
+            )
+            occ_drop_percent = st.slider(
+                "Occupancy Drop Percentage",
+                min_value=1,
+                max_value=50,
+                value=15,
+                step=1,
+                key="occ_drop_slider",
+                help="Percentage drop in occupancy to analyze"
+            )
+        
+        with col2:
+            st.write("**Current Occupancy Analysis**")
+            if not occupancy_data.empty:
+                current_occ = occupancy_data['Occ%'].mean() if 'Occ%' in occupancy_data.columns else 0
+                st.metric("Current Average Occupancy", f"{current_occ:.1f}%")
+                
+                new_occ = current_occ * (1 - occ_drop_percent / 100)
+                st.metric(
+                    f"Occupancy After {occ_drop_percent}% Drop", 
+                    f"{new_occ:.1f}%",
+                    delta=f"-{current_occ - new_occ:.1f}%"
+                )
+        
+        if st.button("Calculate Occupancy Impact", key="calc_occ_impact"):
+            if not occupancy_data.empty:
+                with st.spinner("Calculating revenue impact..."):
+                    try:
+                        # Get recent data for calculation
+                        recent_data = occupancy_data.tail(30)
+                        
+                        # Handle ADR column variations
+                        if 'ADR' in recent_data.columns:
+                            avg_adr = recent_data['ADR'].mean()
+                        else:
+                            avg_adr = 300  # Default ADR
+                            st.warning("Using default ADR estimate (AED 300)")
+                        
+                        # Handle Rooms column variations
+                        if 'Rooms' in recent_data.columns:
+                            total_rooms = recent_data['Rooms'].mean()
+                        elif 'Total_Rooms' in recent_data.columns:
+                            total_rooms = recent_data['Total_Rooms'].mean()
+                        else:
+                            total_rooms = 200  # Default room count
+                            st.warning("Using default room count estimate (200 rooms)")
+                            
+                        avg_days_per_month = 30
+                        
+                        current_rooms_sold = total_rooms * (current_occ / 100)
+                        new_rooms_sold = total_rooms * (new_occ / 100)
+                        
+                        current_monthly_revenue = avg_adr * current_rooms_sold * avg_days_per_month
+                        new_monthly_revenue = avg_adr * new_rooms_sold * avg_days_per_month
+                        revenue_impact = current_monthly_revenue - new_monthly_revenue
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric(
+                                "Current Monthly Revenue",
+                                f"AED {current_monthly_revenue:,.0f}"
+                            )
+                        
+                        with col2:
+                            st.metric(
+                                "Revenue After Occ Drop",
+                                f"AED {new_monthly_revenue:,.0f}",
+                                delta=f"-AED {revenue_impact:,.0f}"
+                            )
+                        
+                        with col3:
+                            st.metric(
+                                "Revenue Loss",
+                                f"AED {revenue_impact:,.0f}",
+                                delta=f"-{(revenue_impact/current_monthly_revenue)*100:.1f}%"
+                            )
+                        
+                        # Show rooms sold comparison
+                        st.subheader("Rooms Sold Impact")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("Current Rooms/Day", f"{current_rooms_sold:.0f}")
+                        
+                        with col2:
+                            st.metric(
+                                "New Rooms/Day", 
+                                f"{new_rooms_sold:.0f}",
+                                delta=f"-{current_rooms_sold - new_rooms_sold:.0f}"
+                            )
+                        
+                        with col3:
+                            st.metric("Rooms Lost/Month", f"{(current_rooms_sold - new_rooms_sold) * avg_days_per_month:.0f}")
+                        
+                        # Show visualization
+                        fig_occ = go.Figure()
+                        
+                        fig_occ.add_trace(go.Bar(
+                            name='Current Revenue',
+                            x=[target_month_occ],
+                            y=[current_monthly_revenue],
+                            marker_color='lightgreen'
+                        ))
+                        
+                        fig_occ.add_trace(go.Bar(
+                            name=f'Revenue after {occ_drop_percent}% occupancy drop',
+                            x=[target_month_occ],
+                            y=[new_monthly_revenue],
+                            marker_color='lightcoral'
+                        ))
+                        
+                        fig_occ.update_layout(
+                            title=f"Revenue Impact of {occ_drop_percent}% Occupancy Drop",
+                            xaxis_title="Period",
+                            yaxis_title="Revenue (AED)",
+                            barmode='group',
+                            height=400
+                        )
+                        
+                        st.plotly_chart(fig_occ, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error calculating occupancy impact: {str(e)}")
+            else:
+                st.warning("No occupancy data available for occupancy analysis")
+    
+    with scenario_tab3:
+        st.subheader("📊 Current Month BOB & Pickup Requirements")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            revenue_target = st.number_input(
+                "Monthly Revenue Target (AED)",
+                min_value=1000000,
+                max_value=50000000,
+                value=1750000,  # Changed default to 1.75M
+                step=10000,
+                key="revenue_target_input",
+                help="Enter your target revenue for the current month"
+            )
+            
+            # Demo BOB input for testing
+            demo_bob_input = st.number_input(
+                "Current BOB (AED) - Demo Override",
+                min_value=0,
+                max_value=10000000,
+                value=1690000,  # Default to 1.69M as per example
+                step=10000,
+                key="demo_bob_input",
+                help="Manual BOB input for demonstration purposes"
+            )
+            
+            if st.checkbox("Use Demo BOB Value", value=True, key="use_demo_bob"):
+                st.session_state.demo_bob = demo_bob_input
+        
+        with col2:
+            st.write("**Current Date Settings**")
+            from datetime import datetime, timedelta
+            import calendar
+            
+            today = datetime.now()
+            yesterday = today - timedelta(days=1)
+            days_in_month = calendar.monthrange(today.year, today.month)[1]
+            days_remaining = days_in_month - today.day
+            
+            st.info(f"Today: {today.strftime('%Y-%m-%d')}")
+            st.info(f"Days passed: {today.day - 1}")
+            st.info(f"Days remaining: {days_remaining}")
+        
+        if st.button("Calculate Pickup Requirements", key="calc_pickup"):
+            if not segment_data.empty:
+                with st.spinner("Calculating current month BOB and pickup requirements..."):
+                    try:
+                        # Get BOB column name (handle variations)
+                        bob_column = None
+                        for col in ['BusinessOnTheBooksRevenue', 'BOB', 'Business_On_Books', 'Revenue']:
+                            if col in segment_data.columns:
+                                bob_column = col
+                                break
+                        
+                        if bob_column is None:
+                            st.error("No Business on Books revenue column found in data")
+                            return
+                        
+                        # For current month BOB, we'll use recent data and estimate current month performance
+                        # Since segment data might be monthly aggregated, we'll estimate based on recent trends
+                        if len(segment_data) > 0:
+                            # Get the most recent month's data as baseline
+                            recent_monthly_revenue = segment_data[bob_column].iloc[-1] if len(segment_data) > 0 else 0
+                            
+                            # Estimate current month BOB based on days passed
+                            # Assuming the recent monthly revenue represents a full month
+                            days_passed = today.day - 1
+                            if days_passed > 0:
+                                # Estimate daily average from recent month and multiply by days passed
+                                estimated_daily_revenue = recent_monthly_revenue / days_in_month
+                                current_bob = estimated_daily_revenue * days_passed
+                            else:
+                                current_bob = 0
+                        else:
+                            current_bob = 0
+                            
+                        # If we have a specific current month BOB value provided by user (for demo purposes)
+                        # This allows manual override for testing
+                        if st.session_state.get('demo_bob'):
+                            current_bob = st.session_state.demo_bob
+                        
+                        pickup_required = revenue_target - current_bob
+                        daily_pickup_needed = pickup_required / days_remaining if days_remaining > 0 else 0
+                        
+                        # Calculate performance metrics
+                        mtd_performance = (current_bob / revenue_target) * 100 if revenue_target > 0 else 0
+                        days_passed_pct = ((today.day - 1) / days_in_month) * 100
+                        
+                        # Display key metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric(
+                                "Business on Books",
+                                f"AED {current_bob:,.0f}",
+                                f"{mtd_performance:.1f}% of target"
+                            )
+                        
+                        with col2:
+                            st.metric(
+                                "Revenue Target",
+                                f"AED {revenue_target:,.0f}"
+                            )
+                        
+                        with col3:
+                            st.metric(
+                                "Pickup Required",
+                                f"AED {pickup_required:,.0f}",
+                                delta=f"{(pickup_required/revenue_target)*100:.1f}% needed"
+                            )
+                        
+                        with col4:
+                            st.metric(
+                                "Daily Pickup Needed",
+                                f"AED {daily_pickup_needed:,.0f}",
+                                f"for {days_remaining} days"
+                            )
+                        
+                        # Performance analysis
+                        st.subheader("📈 Month-to-Date Performance")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            # Progress visualization
+                            fig_progress = go.Figure()
+                            
+                            fig_progress.add_trace(go.Bar(
+                                name='Achieved (BOB)',
+                                x=['Current Month'],
+                                y=[current_bob],
+                                marker_color='lightblue'
+                            ))
+                            
+                            fig_progress.add_trace(go.Bar(
+                                name='Pickup Required',
+                                x=['Current Month'],
+                                y=[pickup_required],
+                                marker_color='lightcoral'
+                            ))
+                            
+                            fig_progress.update_layout(
+                                title="BOB vs Pickup Required",
+                                xaxis_title="Period",
+                                yaxis_title="Revenue (AED)",
+                                barmode='stack',
+                                height=400
+                            )
+                            
+                            st.plotly_chart(fig_progress, use_container_width=True)
+                        
+                        with col2:
+                            # Performance indicators
+                            if mtd_performance >= days_passed_pct:
+                                st.success("✅ Performance is on track!")
+                                st.info(f"You are {mtd_performance - days_passed_pct:.1f}% ahead of target pace")
+                            else:
+                                st.warning("⚠️ Performance is behind target pace")
+                                st.info(f"You are {days_passed_pct - mtd_performance:.1f}% behind target pace")
+                            
+                            # Calculate required run rate
+                            if days_remaining > 0:
+                                required_run_rate = pickup_required / days_remaining
+                                st.metric(
+                                    "Required Daily Run Rate",
+                                    f"AED {required_run_rate:,.0f}",
+                                    help="Daily revenue needed to achieve target"
+                                )
+                            
+                            # Historical comparison
+                            if not segment_data.empty and len(segment_data) >= 2:
+                                # Get previous month's revenue for comparison
+                                previous_month_revenue = segment_data[bob_column].iloc[-2] if len(segment_data) >= 2 else 0
+                                previous_month_same_period_adj = (previous_month_revenue / days_in_month) * (today.day - 1)
+                                
+                                if previous_month_same_period_adj > 0:
+                                    variance = current_bob - previous_month_same_period_adj
+                                    variance_pct = ((current_bob / previous_month_same_period_adj) - 1) * 100
+                                    
+                                    st.metric(
+                                        "vs Same Period Last Month",
+                                        f"AED {variance:,.0f}",
+                                        delta=f"{variance_pct:.1f}%"
+                                    )
+                                else:
+                                    st.metric(
+                                        "vs Same Period Last Month",
+                                        "N/A",
+                                        help="No historical data available"
+                                    )
+                        
+                        # Additional insights
+                        st.subheader("💡 Insights & Recommendations")
+                        
+                        if pickup_required > 0:
+                            st.info(f"**Action Required:** You need to generate AED {pickup_required:,.0f} more revenue over the next {days_remaining} days.")
+                            st.info(f"**Daily Target:** Achieve AED {daily_pickup_needed:,.0f} per day on average.")
+                            
+                            if daily_pickup_needed > 0:
+                                # Estimate rooms needed (assuming current ADR)
+                                if not occupancy_data.empty and 'ADR' in occupancy_data.columns:
+                                    current_adr = occupancy_data['ADR'].mean()
+                                    rooms_per_day_needed = daily_pickup_needed / current_adr
+                                    st.info(f"**Rooms Needed:** Approximately {rooms_per_day_needed:.0f} additional rooms per day at current ADR of AED {current_adr:.0f}")
+                        else:
+                            st.success(f"🎉 **Congratulations!** You have already exceeded your monthly target by AED {abs(pickup_required):,.0f}")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error calculating pickup requirements: {str(e)}")
+            else:
+                st.warning("No segment data available for BOB analysis")
 
 def machine_learning_tab():
     """Machine Learning Analysis Tab"""
@@ -9802,6 +10467,7 @@ def main():
             "Daily Occupancy", 
             "Segment Analysis",
             "ADR Analysis",
+            "Weekly Analysis",
             "STR Report",
             "Block Analysis",
             "Events Analysis",
@@ -9869,6 +10535,8 @@ def main():
         segment_analysis_tab()
     elif current_tab == "ADR Analysis":
         adr_analysis_tab()
+    elif current_tab == "Weekly Analysis":
+        weekly_analysis_tab()
     elif current_tab == "STR Report":
         str_report_tab()
     elif current_tab == "Block Analysis":
