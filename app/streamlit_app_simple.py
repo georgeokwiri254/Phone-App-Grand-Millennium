@@ -92,6 +92,13 @@ try:
 except ImportError:
     ENHANCED_GEMINI_AVAILABLE = False
 
+# SQL Agent for AI Assistant
+try:
+    from app.sql_agent import SQLAgent
+    SQL_AGENT_AVAILABLE = True
+except ImportError:
+    SQL_AGENT_AVAILABLE = False
+
 # Add project root and converters to path
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
@@ -10402,6 +10409,131 @@ def enhanced_gpt_tab():
         gpt_tab()
 
 
+def ai_assistant_tab():
+    """AI Assistant tab with local LLM for natural language SQL queries"""
+    st.header("🤖 AI Revenue Assistant")
+    st.markdown("Ask questions about your revenue data in natural language!")
+    
+    if not SQL_AGENT_AVAILABLE:
+        st.error("SQL Agent not available. Please ensure all dependencies are installed.")
+        return
+    
+    # Initialize SQL Agent in session state
+    if 'sql_agent' not in st.session_state:
+        try:
+            model_path = "models/Phi-3-mini-4k-instruct-q4.gguf" 
+            db_path = "db/revenue.db"
+            
+            with st.spinner("Loading AI model... This may take a moment."):
+                st.session_state.sql_agent = SQLAgent(db_path, model_path)
+            st.success("AI Assistant ready!")
+        except Exception as e:
+            st.error(f"Failed to initialize AI Assistant: {e}")
+            return
+    
+    # Query interface
+    st.subheader("💬 Ask Your Question")
+    
+    # Sample questions
+    with st.expander("📝 Sample Questions"):
+        sample_questions = [
+            "What was the total revenue in August 2025?",
+            "Show me occupancy percentage for the last 7 days",
+            "Which segment had the highest ADR this month?", 
+            "How many group blocks are confirmed for September?",
+            "What is the average RevPar for weekends?",
+            "Show me the top 5 companies by block size"
+        ]
+        
+        for i, question in enumerate(sample_questions):
+            if st.button(f"📌 {question}", key=f"sample_q_{i}"):
+                st.session_state.current_question = question
+    
+    # Query input
+    current_question = st.session_state.get('current_question', '')
+    user_question = st.text_input(
+        "Enter your question:",
+        value=current_question,
+        placeholder="e.g., What was the total revenue for July 2025?",
+        key="ai_question_input"
+    )
+    
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        ask_button = st.button("🚀 Ask AI", type="primary")
+    with col2:
+        if st.button("🗑️ Clear"):
+            st.session_state.current_question = ''
+            st.rerun()
+    
+    # Process query
+    if ask_button and user_question.strip():
+        with st.spinner("🤖 AI is thinking..."):
+            try:
+                result = st.session_state.sql_agent.query(user_question)
+                
+                # Display results
+                st.subheader("📊 Results")
+                
+                # Show generated SQL
+                with st.expander("🔍 Generated SQL Query"):
+                    st.code(result['sql'], language='sql')
+                
+                if result['success']:
+                    if result['results']:
+                        # Convert to DataFrame for better display
+                        df = pd.DataFrame(result['results'], columns=result['columns'])
+                        
+                        st.success(f"Found {len(df)} results")
+                        
+                        # Display as table
+                        st.dataframe(df, use_container_width=True)
+                        
+                        # Simple visualization for numeric data
+                        numeric_cols = df.select_dtypes(include=[np.number]).columns
+                        if len(numeric_cols) > 0 and len(df) > 1:
+                            st.subheader("📈 Quick Visualization")
+                            
+                            if len(numeric_cols) == 1:
+                                # Single numeric column - bar chart
+                                fig = px.bar(df, y=numeric_cols[0], title=f"{numeric_cols[0]} Distribution")
+                                st.plotly_chart(fig, use_container_width=True)
+                            elif len(numeric_cols) >= 2:
+                                # Multiple numeric columns - line chart if there's a date column
+                                date_cols = [col for col in df.columns if 'date' in col.lower() or 'Date' in col]
+                                if date_cols:
+                                    fig = px.line(df, x=date_cols[0], y=numeric_cols[0], 
+                                                title=f"{numeric_cols[0]} over time")
+                                    st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("Query executed successfully but returned no results.")
+                else:
+                    st.error(f"Query failed: {result['error']}")
+                    
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+    
+    # Model information
+    with st.expander("ℹ️ About the AI Assistant"):
+        st.markdown("""
+        **AI Model**: Phi-3-mini (4B parameters, quantized)
+        **Capabilities**: 
+        - Natural language to SQL conversion
+        - Revenue analytics queries
+        - Hotel occupancy analysis
+        - Segment performance analysis
+        - Block booking analysis
+        
+        **Privacy**: All processing happens locally on your machine - no data leaves your system.
+        
+        **Database Tables Available**:
+        - `occupancy_analysis` - Daily occupancy data
+        - `segment_analysis` - Customer segment performance  
+        - `block_analysis` - Group block bookings
+        - `historical_*` tables - Historical data (2022-2024)
+        - And more...
+        """)
+
 def main():
     """Main application with simple sidebar"""
     
@@ -10475,6 +10607,7 @@ def main():
             "Historical & Forecast",
             "Enhanced Forecasting",
             "Machine Learning",
+            "AI Assistant",
             "GPT",
             "Insights Analysis",
             "Controls & Logs"
@@ -10551,6 +10684,8 @@ def main():
         enhanced_forecasting_tab()
     elif current_tab == "Machine Learning":
         machine_learning_tab()
+    elif current_tab == "AI Assistant":
+        ai_assistant_tab()
     elif current_tab == "GPT":
         enhanced_gpt_tab()
     elif current_tab == "Insights Analysis":
