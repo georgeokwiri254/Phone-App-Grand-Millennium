@@ -9,3 +9,4 @@ pywebview>=4.0.0
 google-generativeai>=0.3.0
 prophet>=1.1.0
 llama-cpp-python>=0.3.0
+pybind11>=2.6.0

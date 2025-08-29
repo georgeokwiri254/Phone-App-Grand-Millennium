@@ -161,7 +161,7 @@ class InteractiveChatInterface:
             for col in display_df.columns:
                 if display_df[col].dtype in ['float64', 'int64']:
                     if 'Revenue' in col or 'ADR' in col or 'RevPAR' in col:
-                        display_df[col] = display_df[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
+                        display_df[col] = display_df[col].apply(lambda x: f"AED {x:,.0f}" if pd.notna(x) else "")
                     elif 'Occupancy' in col or 'Occ_Pct' in col:
                         display_df[col] = display_df[col].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "")
                     elif 'Rooms' in col:
@@ -191,10 +191,10 @@ class InteractiveChatInterface:
             if len(df) > 1:
                 fig = px.line(df, x='Date', y=revenue_col, 
                              title='📈 Revenue Trend',
-                             labels={revenue_col: 'Revenue ($)', 'Date': 'Date'})
+                             labels={revenue_col: 'Revenue (AED)', 'Date': 'Date'})
                 fig.update_layout(
                     xaxis_title="Date",
-                    yaxis_title="Revenue ($)",
+                    yaxis_title="Revenue (AED)",
                     showlegend=False,
                     height=400
                 )
@@ -221,10 +221,10 @@ class InteractiveChatInterface:
             if 'Business_on_the_Books_Revenue' in df.columns:
                 fig = px.bar(df, x='Segment', y='Business_on_the_Books_Revenue',
                             title='💼 Revenue by Business Segment',
-                            labels={'Business_on_the_Books_Revenue': 'Revenue ($)', 'Segment': 'Business Segment'})
+                            labels={'Business_on_the_Books_Revenue': 'Revenue (AED)', 'Segment': 'Business Segment'})
                 fig.update_layout(
                     xaxis_title="Business Segment",
-                    yaxis_title="Revenue ($)",
+                    yaxis_title="Revenue (AED)",
                     height=400
                 )
                 st.plotly_chart(fig, use_container_width=True)

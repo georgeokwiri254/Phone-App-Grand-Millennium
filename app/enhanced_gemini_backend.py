@@ -30,7 +30,7 @@ class EnhancedGeminiBackend:
         # Configure Gemini
         try:
             genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            self.model = genai.GenerativeModel('gemini-2.0-flash-lite')
             self.connected = True
         except Exception as e:
             self.connected = False
@@ -57,17 +57,26 @@ class EnhancedGeminiBackend:
 
 📊 HISTORICAL DATA (2022-2024):
 - historical_occupancy_YYYY: Year-specific occupancy and revenue data
+  Columns: Date, DOW, "Rm Sold", Revenue, ADR, RevPar, Year
+  
 - historical_segment_YYYY: Business segment performance by year
+  Columns: Month, Segment, Business_on_the_Books_Rooms, Business_on_the_Books_Revenue, Business_on_the_Books_ADR, MergedSegment, Year
+  ⚠️ CRITICAL: Use "Business_on_the_Books_Revenue" NOT "Revenue"
   
 🎯 SEGMENT ANALYSIS:
 - segment_analysis: Current segment performance with forecasting
-  Includes: Daily pickup, MTD, BOB (Business on Books), YoY comparisons, budget vs actual
+  Revenue Columns: Business_on_the_Books_Revenue, Daily_Pick_up_Revenue, Month_to_Date_Revenue
+  ADR Columns: Business_on_the_Books_ADR, Daily_Pick_up_ADR, Month_to_Date_ADR
+  ⚠️ CRITICAL: NO simple "Revenue" column exists - must use specific revenue types
   
 🚀 RESERVATIONS & ARRIVALS:
 - entered_on: Future reservations and booking patterns
-  Key fields: Lead time, seasonal patterns, company analysis, monthly splits
+  Key columns: COMPANY_CLEAN (company name), C_T_S_NAME (travel agent), AMOUNT (revenue), TOTAL, NET, ADR
+  ⚠️ CRITICAL: Use "COMPANY_CLEAN" NOT "Company", use "AMOUNT" NOT "Revenue"
+  Lead time: BOOKING_LEAD_TIME, Season: SEASON
   
 - arrivals: Guest arrival details and patterns
+  Key columns: COMPANY_NAME, COMPANY_NAME_CLEAN, CALCULATED_ADR, AMOUNT
   Fields: Company analysis, deposit status, rate codes, seasonal flags
 
 🏢 BLOCK BUSINESS:
@@ -123,8 +132,8 @@ class EnhancedGeminiBackend:
                 total_revenue = df[revenue_col].sum()
                 avg_revenue = df[revenue_col].mean()
                 
-                insights.append(f"💰 Total Revenue: ${total_revenue:,.0f}")
-                insights.append(f"📊 Average Daily Revenue: ${avg_revenue:,.0f}")
+                insights.append(f"💰 Total Revenue: AED {total_revenue:,.0f}")
+                insights.append(f"📊 Average Daily Revenue: AED {avg_revenue:,.0f}")
                 
                 # Trend analysis
                 if len(df) > 1:
@@ -150,7 +159,7 @@ class EnhancedGeminiBackend:
             # ADR analysis
             if 'ADR' in df.columns:
                 avg_adr = df['ADR'].mean()
-                insights.append(f"💵 Average ADR: ${avg_adr:.0f}")
+                insights.append(f"💵 Average ADR: AED {avg_adr:.0f}")
                 
                 if avg_adr > 200:
                     patterns.append("💎 Premium rate positioning")
@@ -379,6 +388,29 @@ ADVANCED SQL GENERATION RULES:
 9. Format dates properly for display
 10. Use meaningful column aliases for clarity
 
+⚠️ CRITICAL COLUMN NAME RULES:
+- For segment analysis: Use "Business_on_the_Books_Revenue" NOT "Revenue"
+- For historical segments: Use "Business_on_the_Books_Revenue" NOT "Revenue"  
+- For entered_on table: Use "COMPANY_CLEAN" NOT "Company_Name", use "AMOUNT" NOT "Revenue"
+- For arrivals table: Use "COMPANY_NAME_CLEAN" NOT "Company"
+- Column names with spaces must be quoted: "Rm Sold" not Rm_Sold
+- When joining tables, ensure column names match exactly
+- segment_analysis does NOT have simple "Revenue" column
+- historical_segment_YYYY tables only have "Business_on_the_Books_Revenue"
+- entered_on table does NOT have "Company", "Company_Name" or "Revenue" columns
+- ❌ NEVER use: Company_Name, Revenue (these columns DO NOT EXIST in entered_on table)
+- ✅ ALWAYS use: COMPANY_CLEAN for company, AMOUNT for revenue in entered_on table
+- Use table aliases when joining: T1.MergedSegment, T2.MergedSegment to avoid ambiguity
+- Replace YYYY with actual years: historical_segment_2022, historical_segment_2023, historical_segment_2024
+
+📝 RECOMMENDED QUERY PATTERNS:
+- For top segments single year: SELECT MergedSegment, SUM(Business_on_the_Books_Revenue) FROM historical_segment_2024 GROUP BY MergedSegment ORDER BY SUM(Business_on_the_Books_Revenue) DESC
+- For multi-year segments: Use UNION ALL approach, not complex JOINs
+- For top companies from entered_on: SELECT COMPANY_CLEAN AS Company_Name, SUM(AMOUNT) AS Total_Revenue FROM entered_on GROUP BY COMPANY_CLEAN ORDER BY SUM(AMOUNT) DESC LIMIT 5
+- For company revenue by year from entered_on: SELECT COMPANY_CLEAN, SUM(CASE WHEN strftime('%Y', ARRIVAL) = '2024' THEN AMOUNT ELSE 0 END) AS Revenue_2024, SUM(CASE WHEN strftime('%Y', ARRIVAL) = '2023' THEN AMOUNT ELSE 0 END) AS Revenue_2023 FROM entered_on GROUP BY COMPANY_CLEAN ORDER BY Revenue_2024 DESC LIMIT 5
+- For company revenue from arrivals: SELECT COMPANY_NAME_CLEAN, SUM(AMOUNT) FROM arrivals GROUP BY COMPANY_NAME_CLEAN ORDER BY SUM(AMOUNT) DESC
+- Avoid JOINs between historical_segment tables - use UNION instead
+
 HOSPITALITY DOMAIN KNOWLEDGE:
 - ADR = Revenue / Rooms Sold
 - RevPAR = Revenue / Available Rooms = ADR × Occupancy%
@@ -387,8 +419,17 @@ HOSPITALITY DOMAIN KNOWLEDGE:
 - Lead time = Days between booking and arrival
 - High season typically: Oct-Apr for Dubai
 - Weekend = Friday-Saturday in Middle East
+- 💰 CURRENCY: All revenue amounts are in AED (United Arab Emirates Dirham)
+- When displaying currency, always use "AED" not "$" or "USD"
 
 QUESTION: {question}
+
+CRITICAL INSTRUCTIONS:
+- Generate ONLY ONE SQL query
+- Do NOT include multiple queries 
+- Do NOT include comments or explanations
+- Return ONLY the SQL SELECT statement
+- No markdown formatting or code blocks
 
 Generate a precise SQL query that provides actionable business intelligence:
 """
@@ -399,6 +440,20 @@ Generate a precise SQL query that provides actionable business intelligence:
             
             # Clean up the response
             sql_query = sql_query.replace('```sql', '').replace('```', '').strip()
+            
+            # If multiple statements, take only the first SELECT statement
+            if '--' in sql_query:
+                # Split by comment lines and take the first part
+                sql_query = sql_query.split('--')[0].strip()
+            
+            # If multiple queries separated by semicolons, take the first
+            if ';' in sql_query:
+                statements = sql_query.split(';')
+                for stmt in statements:
+                    stmt = stmt.strip()
+                    if stmt.upper().startswith('SELECT'):
+                        sql_query = stmt
+                        break
             
             # Final safety check
             if not self.is_safe_query(sql_query):
@@ -417,7 +472,11 @@ Generate a precise SQL query that provides actionable business intelligence:
         query_clean = re.sub(r'/\*.*?\*/', '', query_clean, flags=re.DOTALL)
         query_clean = query_clean.strip().upper()
         
-        # Check for dangerous keywords
+        # Must start with SELECT
+        if not query_clean.startswith('SELECT'):
+            return False
+        
+        # Check for dangerous keywords (excluding UNION which is safe in SELECT context)
         dangerous_keywords = [
             'DELETE', 'UPDATE', 'INSERT', 'DROP', 'CREATE', 'ALTER',
             'TRUNCATE', 'REPLACE', 'EXEC', 'EXECUTE', 'PRAGMA',
@@ -428,9 +487,20 @@ Generate a precise SQL query that provides actionable business intelligence:
             if keyword in query_clean:
                 return False
         
-        # Must start with SELECT
-        if not query_clean.startswith('SELECT'):
-            return False
+        # Additional check: if UNION is present, ensure it's only in SELECT context
+        if 'UNION' in query_clean:
+            # Split by UNION and check that each part starts with SELECT
+            union_parts = query_clean.split('UNION')
+            for i, part in enumerate(union_parts):
+                part = part.strip()
+                if part.startswith('ALL'):
+                    part = part[3:].strip()  # Remove "ALL" from "UNION ALL"
+                if i == 0:  # First part
+                    if not part.startswith('SELECT'):
+                        return False
+                else:  # Subsequent parts after UNION
+                    if not part.startswith('SELECT'):
+                        return False
         
         return True
     

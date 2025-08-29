@@ -92,6 +92,20 @@ try:
 except ImportError:
     ENHANCED_GEMINI_AVAILABLE = False
 
+# C++ Integration Module
+try:
+    from app.cpp_demo_tab import render_cpp_demo_tab
+    CPP_DEMO_AVAILABLE = True
+except ImportError:
+    CPP_DEMO_AVAILABLE = False
+
+# High-performance Revenue Calculator
+try:
+    from app.revenue_calculator import get_revenue_calculator, show_performance_badge, enhanced_metric_card
+    REVENUE_CALCULATOR_AVAILABLE = True
+except ImportError:
+    REVENUE_CALCULATOR_AVAILABLE = False
+
 # SQL Agent for AI Assistant
 try:
     from app.sql_agent import SQLAgent
@@ -10607,6 +10621,7 @@ def main():
             "Historical & Forecast",
             "Enhanced Forecasting",
             "Machine Learning",
+            "C++ Performance",
             "AI Assistant",
             "GPT",
             "Insights Analysis",
@@ -10634,6 +10649,10 @@ def main():
             st.success("✅ Data Loaded")
         else:
             st.warning("⚠️ No Data")
+        
+        # C++ Performance Badge
+        if REVENUE_CALCULATOR_AVAILABLE:
+            show_performance_badge()
     
     # Main content
     st.markdown(f"""
@@ -10684,6 +10703,11 @@ def main():
         enhanced_forecasting_tab()
     elif current_tab == "Machine Learning":
         machine_learning_tab()
+    elif current_tab == "C++ Performance":
+        if CPP_DEMO_AVAILABLE:
+            render_cpp_demo_tab()
+        else:
+            st.error("C++ demo module not available")
     elif current_tab == "AI Assistant":
         ai_assistant_tab()
     elif current_tab == "GPT":

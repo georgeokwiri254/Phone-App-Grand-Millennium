@@ -30,7 +30,7 @@ class GeminiSQLBackend:
         # Configure Gemini
         try:
             genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            self.model = genai.GenerativeModel('gemini-2.0-flash-lite')
             self.connected = True
         except Exception as e:
             self.connected = False
@@ -89,19 +89,33 @@ class GeminiSQLBackend:
         query_clean = re.sub(r'/\*.*?\*/', '', query_clean, flags=re.DOTALL)
         query_clean = query_clean.strip().upper()
         
-        # Check for dangerous keywords
+        # Must start with SELECT
+        if not query_clean.startswith('SELECT'):
+            return False
+        
+        # Check for dangerous keywords (excluding UNION which is safe in SELECT context)
         dangerous_keywords = [
             'DELETE', 'UPDATE', 'INSERT', 'DROP', 'CREATE', 'ALTER',
-            'TRUNCATE', 'REPLACE', 'EXEC', 'EXECUTE', 'UNION'
+            'TRUNCATE', 'REPLACE', 'EXEC', 'EXECUTE'
         ]
         
         for keyword in dangerous_keywords:
             if keyword in query_clean:
                 return False
         
-        # Must start with SELECT
-        if not query_clean.startswith('SELECT'):
-            return False
+        # Additional check: if UNION is present, ensure it's only in SELECT context
+        if 'UNION' in query_clean:
+            union_parts = query_clean.split('UNION')
+            for i, part in enumerate(union_parts):
+                part = part.strip()
+                if part.startswith('ALL'):
+                    part = part[3:].strip()
+                if i == 0:
+                    if not part.startswith('SELECT'):
+                        return False
+                else:
+                    if not part.startswith('SELECT'):
+                        return False
         
         return True
     
@@ -162,9 +176,20 @@ IMPORTANT CONTEXT:
 - Reservations: entered_on (reservations entered), arrivals (guest arrivals)
 - Block business: block_analysis
 - Dates are in various formats: 'YYYY-MM-DD', timestamps, or text
-- Revenue columns include: Revenue, Daily_Revenue, Business_on_the_Books_Revenue
-- Room columns include: Rm_Sold, Rooms_Sold, Business_on_the_Books_Rooms
-- ADR columns include: ADR, Business_on_the_Books_ADR
+
+⚠️ CRITICAL COLUMN RULES:
+- segment_analysis does NOT have "Revenue" column - use "Business_on_the_Books_Revenue"
+- historical_segment_YYYY tables use "Business_on_the_Books_Revenue" NOT "Revenue"
+- entered_on table: Use "COMPANY_CLEAN" NOT "Company_Name", use "AMOUNT" NOT "Revenue"
+- ❌ NEVER use: Company_Name, Revenue (these columns DO NOT EXIST in entered_on table)
+- ✅ ALWAYS use: COMPANY_CLEAN for company, AMOUNT for revenue in entered_on table
+- arrivals table: Use "COMPANY_NAME_CLEAN" NOT "Company", use "AMOUNT" for revenue
+- Some columns have spaces: "Rm Sold" (must be quoted in SQL)
+- Room columns: Rm_Sold, Rooms_Sold, "Rm Sold", Business_on_the_Books_Rooms
+- ADR columns: ADR, Business_on_the_Books_ADR
+- Replace YYYY with actual years: historical_segment_2022, historical_segment_2023, historical_segment_2024
+- For segments use: SELECT MergedSegment, SUM(Business_on_the_Books_Revenue) FROM historical_segment_2024
+- For top companies from entered_on: SELECT COMPANY_CLEAN AS Company_Name, SUM(AMOUNT) AS Total_Revenue FROM entered_on GROUP BY COMPANY_CLEAN ORDER BY SUM(AMOUNT) DESC LIMIT 5
 
 Rules:
 1. Only generate SELECT queries
@@ -179,8 +204,12 @@ Rules:
 10. For revenue totals, use SUM() on revenue columns
 11. For occupancy, use occupancy_analysis or hotel_data_combined tables
 12. For segment analysis, use segment_analysis or historical_segment_YYYY tables
+13. 💰 CURRENCY: All revenue amounts are in AED (United Arab Emirates Dirham)
+14. When mentioning currency, always use "AED" not "$" or "USD"
 
 Question: {question}
+
+CRITICAL: Return ONLY a single SQL SELECT statement with NO comments or explanations.
 
 SQL Query:
 """
@@ -191,6 +220,18 @@ SQL Query:
             
             # Clean up the response
             sql_query = sql_query.replace('```sql', '').replace('```', '').strip()
+            
+            # Handle multiple statements - take first SELECT
+            if '--' in sql_query:
+                sql_query = sql_query.split('--')[0].strip()
+            
+            if ';' in sql_query:
+                statements = sql_query.split(';')
+                for stmt in statements:
+                    stmt = stmt.strip()
+                    if stmt.upper().startswith('SELECT'):
+                        sql_query = stmt
+                        break
             
             # Final safety check
             if not self.is_safe_query(sql_query):

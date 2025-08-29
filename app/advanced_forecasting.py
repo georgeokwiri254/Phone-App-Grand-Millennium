@@ -56,10 +56,12 @@ class AdvancedForecastor:
         
         return months
     
-    def forecast_three_months_weighted(self, segment_df: pd.DataFrame, occupancy_df: pd.DataFrame) -> pd.DataFrame:
+    def forecast_three_months_weighted(self, segment_df: pd.DataFrame, occupancy_df: pd.DataFrame,
+                                      current_budget_weight: float = 0.7, current_historical_weight: float = 0.3,
+                                      future_budget_weight: float = 0.4, future_historical_weight: float = 0.6) -> pd.DataFrame:
         """
-        Forecast next 3 months with budget weighting
-        More weight on budget for current month and full month last year data
+        Forecast next 3 months with customizable budget weighting
+        Allows adjustment of weights between budget and historical data
         """
         try:
             current_date = datetime.now()
@@ -69,7 +71,9 @@ class AdvancedForecastor:
             
             for month_date, month_name in next_months:
                 month_forecast = self._forecast_single_month_weighted(
-                    segment_df, occupancy_df, month_date, month_name
+                    segment_df, occupancy_df, month_date, month_name,
+                    current_budget_weight, current_historical_weight,
+                    future_budget_weight, future_historical_weight
                 )
                 forecasts.append(month_forecast)
             
@@ -85,22 +89,22 @@ class AdvancedForecastor:
             return pd.DataFrame()
     
     def _forecast_single_month_weighted(self, segment_df: pd.DataFrame, occupancy_df: pd.DataFrame, 
-                                      month_date: datetime, month_name: str) -> pd.DataFrame:
-        """Forecast single month with weighted approach"""
+                                      month_date: datetime, month_name: str,
+                                      current_budget_weight: float, current_historical_weight: float,
+                                      future_budget_weight: float, future_historical_weight: float) -> pd.DataFrame:
+        """Forecast single month with customizable weighted approach"""
         try:
             # Get current month data
             current_month = datetime.now().month
             current_year = datetime.now().year
             
-            # Calculate weights based on month
+            # Use provided weights based on month
             if month_date.month == current_month:
-                # Current month: 70% budget, 30% historical
-                budget_weight = 0.7
-                historical_weight = 0.3
+                budget_weight = current_budget_weight
+                historical_weight = current_historical_weight
             else:
-                # Future months: 40% budget, 60% historical
-                budget_weight = 0.4
-                historical_weight = 0.6
+                budget_weight = future_budget_weight
+                historical_weight = future_historical_weight
             
             # Get budget data for the month
             budget_revenue = self._get_monthly_budget(segment_df, month_date)
