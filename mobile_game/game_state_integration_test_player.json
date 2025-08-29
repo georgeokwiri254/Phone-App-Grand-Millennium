@@ -1,0 +1,33 @@
+{
+  "player_id": "integration_test_player",
+  "total_points": 87180,
+  "level": 3,
+  "achievements": [],
+  "daily_streak": 1,
+  "last_login": "2025-08-29",
+  "completed_challenges": [
+    "daily_occupancy_2025-08-29"
+  ],
+  "unlocked_features": [
+    "Dashboard",
+    "Daily Challenges",
+    "Segment Analysis",
+    "Weekly Missions",
+    "Customer Conquest",
+    "ADR Optimization",
+    "Forecasting Games",
+    "Pricing Master"
+  ],
+  "settings": {
+    "sound_enabled": true,
+    "notifications_enabled": true,
+    "currency_format": "AED"
+  },
+  "statistics": {
+    "games_played": 0,
+    "total_revenue_managed": 0,
+    "best_occupancy": 0,
+    "best_revpar": 0,
+    "challenges_completed": 1
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "player_id": "test_mobile_player",
+  "total_points": 1500,
+  "level": 1,
+  "achievements": [],
+  "daily_streak": 1,
+  "last_login": "2025-08-30",
+  "completed_challenges": [],
+  "unlocked_features": [
+    "Dashboard",
+    "Daily Challenges"
+  ],
+  "settings": {
+    "sound_enabled": true,
+    "notifications_enabled": true,
+    "currency_format": "AED"
+  },
+  "statistics": {
+    "games_played": 0,
+    "total_revenue_managed": 0,
+    "best_occupancy": 0,
+    "best_revpar": 0,
+    "challenges_completed": 0
+  }
+}

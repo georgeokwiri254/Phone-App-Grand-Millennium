@@ -86,7 +86,8 @@ def clean_block_data(df: pd.DataFrame) -> pd.DataFrame:
             'RATE_CODE': 'RateCode',
             'MONTH_DESC': 'MonthDesc',
             'WEEK_DAY': 'WeekDay',
-            'DAY_OF_MONTH': 'DayOfMonth'
+            'DAY_OF_MONTH': 'DayOfMonth',
+            'CF_REVENUE': 'Revenue'
         }
         
         # Select only available columns
@@ -103,6 +104,11 @@ def clean_block_data(df: pd.DataFrame) -> pd.DataFrame:
         if 'BlockSize' in df_clean.columns:
             df_clean['BlockSize'] = pd.to_numeric(df_clean['BlockSize'], errors='coerce')
             df_clean['BlockSize'] = df_clean['BlockSize'].fillna(0).astype(int)
+
+        # Clean Revenue - ensure it's numeric
+        if 'Revenue' in df_clean.columns:
+            df_clean['Revenue'] = pd.to_numeric(df_clean['Revenue'], errors='coerce')
+            df_clean['Revenue'] = df_clean['Revenue'].fillna(0).astype(float)
         
         # Clean booking status
         if 'BookingStatus' in df_clean.columns:

@@ -1,0 +1,71 @@
+# Grand Millennium Revenue Analytics - Mobile Game Requirements
+# For Kivy-based mobile application with AED currency support
+
+# Core Kivy Framework
+kivy
+kivymd
+
+# Mobile packaging and deployment
+buildozer
+python-for-android
+cython
+
+# Data processing and analytics (lightweight versions for mobile)
+pandas
+numpy
+
+# Optional: Reduced dependencies for mobile
+# plotly-offline
+# requests
+
+# Development and testing
+pytest
+pytest-kivy
+
+# Audio support (for game sounds)
+pygame
+
+# Arabic/RTL text support
+python-bidi
+arabic-reshaper
+
+# Date/time utilities
+python-dateutil
+
+# JSON handling (built-in, but specify version for consistency)
+# json - built into Python
+
+# Mobile-specific optimizations
+psutil
+memory-profiler
+
+# Networking (minimal)
+urllib3
+
+# Optional: Local machine learning (very lightweight)
+scikit-learn
+
+# Optional: Charts and visualization (mobile-optimized)
+matplotlib
+
+# Security and encryption
+cryptography
+
+# Configuration management
+pyyaml
+
+# Logging
+colorlog
+
+##############################################
+# BUILDOZER SPECIFIC REQUIREMENTS
+##############################################
+# These are handled by buildozer.spec, but listed here for reference:
+
+# Android-specific (managed by buildozer):
+# - pyjnius (Java bridge)
+# - plyer (Platform access)
+# - android (Android API)
+
+# Note: Keep dependencies minimal for mobile deployment
+# Heavy analytics should be done server-side with API calls

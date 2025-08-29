@@ -1,0 +1,36 @@
+{
+  "player_id": "test_flow_player_new",
+  "total_points": 35000,
+  "level": 2,
+  "achievements": [],
+  "daily_streak": 1,
+  "last_login": "2025-08-30",
+  "completed_challenges": [
+    "daily_occupancy_2025-08-30"
+  ],
+  "unlocked_features": [
+    "Dashboard",
+    "Daily Challenges",
+    "Segment Analysis",
+    "Weekly Missions",
+    "Customer Conquest"
+  ],
+  "settings": {
+    "sound_enabled": true,
+    "notifications_enabled": true,
+    "currency_format": "AED"
+  },
+  "statistics": {
+    "games_played": 0,
+    "total_revenue_managed": 0,
+    "best_occupancy": 0,
+    "best_revpar": 0,
+    "challenges_completed": 1
+  },
+  "tutorial_completed": true,
+  "lifetime_stats": {
+    "total_sessions": 1,
+    "total_play_time": 0,
+    "total_challenges": 1
+  }
+}
